@@ -12,6 +12,7 @@ export default function Planner({
   activeLoc,
   setActiveLoc,
   selection,
+  readOnly,
   onSetCurrent,
   onAddProject,
   onSetPrimary,
@@ -25,6 +26,7 @@ export default function Planner({
   activeLoc: Loc;
   setActiveLoc: (l: Loc) => void;
   selection: Set<string>;
+  readOnly: boolean;
   onSetCurrent: (id: string) => void;
   onAddProject: () => void;
   onSetPrimary: (date: string, resId: string) => void;
@@ -47,6 +49,7 @@ export default function Planner({
   }
 
   function primaryMouseDown(date: string, resId: string, shiftKey: boolean) {
+    if (readOnly) return;
     const key = bkey(date, resId, "P");
     const b = bookings[key];
     if (b && b.proj !== current) return;
@@ -67,6 +70,7 @@ export default function Planner({
   }
 
   function otMouseDown(date: string, resId: string, shiftKey: boolean) {
+    if (readOnly) return;
     const key = bkey(date, resId, "O");
     const b = bookings[key];
     if (shiftKey) {
@@ -98,9 +102,11 @@ export default function Planner({
             </button>
           ))}
         </div>
-        <button className="btn sm" onClick={onAddProject}>
-          + New project
-        </button>
+        {!readOnly && (
+          <button className="btn sm" onClick={onAddProject}>
+            + New project
+          </button>
+        )}
         <span style={{ width: 1, height: 22, background: "var(--line)" }} />
         <span className="fldlabel" style={{ margin: 0 }}>
           Book at
@@ -114,7 +120,7 @@ export default function Planner({
           </button>
         </div>
         <div className="spacer" />
-        {selection.size > 0 && (
+        {!readOnly && selection.size > 0 && (
           <>
             <span className="selinfo">{selection.size} cell(s) selected</span>
             <button className="btn sm" onClick={openMoveModal}>

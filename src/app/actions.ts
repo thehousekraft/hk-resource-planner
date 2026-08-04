@@ -1,6 +1,7 @@
 "use server";
 
 import { getSupabase } from "@/lib/supabase";
+import { getRole, requireRole } from "@/lib/roles";
 import type { AppState, Band, Loc, Project, Resource } from "@/lib/types";
 import { bkey } from "@/lib/types";
 
@@ -9,6 +10,7 @@ export async function loadState(): Promise<{
   projects: Project[];
   bookings: AppState["bookings"];
 }> {
+  const role = await getRole();
   const supa = getSupabase();
   const [
     { data: resources, error: e1 },
@@ -26,11 +28,13 @@ export async function loadState(): Promise<{
   const err = e1 || e2 || e3 || e4 || e5;
   if (err) throw err;
 
+  const isAdmin = role === "admin";
+
   const roster: Resource[] = (resources || []).map((r) => ({
     id: r.id,
     name: r.name,
     trade: r.trade,
-    rate: Number(r.rate),
+    rate: isAdmin ? Number(r.rate) : 0,
     unit: r.unit,
   }));
 
@@ -38,16 +42,18 @@ export async function loadState(): Promise<{
     id: p.id,
     name: p.name,
     color: p.color,
-    revenue: Number(p.revenue) || 0,
+    revenue: isAdmin ? Number(p.revenue) || 0 : 0,
     materials: [],
     areas: {},
   }));
   const byId: Record<string, Project> = {};
   projects.forEach((p) => (byId[p.id] = p));
-  (matRows || []).forEach((m) => {
-    const p = byId[m.project_id];
-    if (p) p.materials.push({ id: m.id, item: m.item || "", cost: Number(m.cost) || 0 });
-  });
+  if (isAdmin) {
+    (matRows || []).forEach((m) => {
+      const p = byId[m.project_id];
+      if (p) p.materials.push({ id: m.id, item: m.item || "", cost: Number(m.cost) || 0 });
+    });
+  }
   (areaRows || []).forEach((a) => {
     const p = byId[a.project_id];
     if (!p) return;
@@ -75,29 +81,34 @@ export async function ensureDefaultProject(p: Project) {
   if (error) throw error;
 }
 
-/* projects */
+/* projects — admin + editor can create/rename/delete projects and book against them;
+   only admin can touch revenue (a cost/P&L figure). */
 export async function insertProject(p: { id: string; name: string; color: string; revenue: number }) {
+  await requireRole("admin", "editor");
   const supa = getSupabase();
   const { error } = await supa.from("projects").insert(p);
   if (error) throw error;
 }
 export async function updateProjectName(id: string, name: string) {
+  await requireRole("admin", "editor");
   const supa = getSupabase();
   const { error } = await supa.from("projects").update({ name }).eq("id", id);
   if (error) throw error;
 }
 export async function updateProjectRevenue(id: string, revenue: number) {
+  await requireRole("admin");
   const supa = getSupabase();
   const { error } = await supa.from("projects").update({ revenue }).eq("id", id);
   if (error) throw error;
 }
 export async function deleteProject(id: string) {
+  await requireRole("admin", "editor");
   const supa = getSupabase();
   const { error } = await supa.from("projects").delete().eq("id", id);
   if (error) throw error;
 }
 
-/* bookings */
+/* bookings — admin + editor only; viewers are read-only */
 export async function upsertBooking(
   date: string,
   resourceId: string,
@@ -106,6 +117,7 @@ export async function upsertBooking(
   loc: Loc,
   hrs?: number,
 ) {
+  await requireRole("admin", "editor");
   const supa = getSupabase();
   const row: Record<string, unknown> = { date, resource_id: resourceId, band, project_id: projectId, loc };
   if (band === "O") row.hrs = hrs;
@@ -113,6 +125,7 @@ export async function upsertBooking(
   if (error) throw error;
 }
 export async function deleteBooking(date: string, resourceId: string, band: Band) {
+  await requireRole("admin", "editor");
   const supa = getSupabase();
   const { error } = await supa
     .from("bookings")
@@ -123,6 +136,7 @@ export async function deleteBooking(date: string, resourceId: string, band: Band
   if (error) throw error;
 }
 export async function moveBooking(date: string, resourceId: string, band: Band, targetProjectId: string) {
+  await requireRole("admin", "editor");
   const supa = getSupabase();
   const { error } = await supa
     .from("bookings")
@@ -133,25 +147,29 @@ export async function moveBooking(date: string, resourceId: string, band: Band, 
   if (error) throw error;
 }
 
-/* materials */
+/* materials — admin only (cost data, part of the P&L tab) */
 export async function insertMaterial(id: string, projectId: string) {
+  await requireRole("admin");
   const supa = getSupabase();
   const { error } = await supa.from("materials").insert({ id, project_id: projectId, item: "", cost: 0 });
   if (error) throw error;
 }
 export async function updateMaterial(id: string, patch: { item?: string; cost?: number }) {
+  await requireRole("admin");
   const supa = getSupabase();
   const { error } = await supa.from("materials").update(patch).eq("id", id);
   if (error) throw error;
 }
 export async function deleteMaterial(id: string) {
+  await requireRole("admin");
   const supa = getSupabase();
   const { error } = await supa.from("materials").delete().eq("id", id);
   if (error) throw error;
 }
 
-/* areas */
+/* areas — admin only (part of the P&L tab) */
 export async function insertArea(id: string, projectId: string, resourceId: string) {
+  await requireRole("admin");
   const supa = getSupabase();
   const { error } = await supa
     .from("areas")
@@ -159,39 +177,46 @@ export async function insertArea(id: string, projectId: string, resourceId: stri
   if (error) throw error;
 }
 export async function updateArea(id: string, patch: { area_name?: string; sqft?: number }) {
+  await requireRole("admin");
   const supa = getSupabase();
   const { error } = await supa.from("areas").update(patch).eq("id", id);
   if (error) throw error;
 }
 export async function deleteArea(id: string) {
+  await requireRole("admin");
   const supa = getSupabase();
   const { error } = await supa.from("areas").delete().eq("id", id);
   if (error) throw error;
 }
 
-/* resources (roster) */
+/* resources (roster) — admin only (names are visible elsewhere, but rate is wage data) */
 export async function insertResource(r: Resource) {
+  await requireRole("admin");
   const supa = getSupabase();
   const { error } = await supa.from("resources").insert(r);
   if (error) throw error;
 }
 export async function updateResource(id: string, patch: Partial<Resource>) {
+  await requireRole("admin");
   const supa = getSupabase();
   const { error } = await supa.from("resources").update(patch).eq("id", id);
   if (error) throw error;
 }
 export async function deleteResource(id: string) {
+  await requireRole("admin");
   const supa = getSupabase();
   const { error } = await supa.from("resources").delete().eq("id", id);
   if (error) throw error;
 }
 export async function getRosterDefaults(): Promise<Resource[]> {
+  await requireRole("admin");
   const supa = getSupabase();
   const { data, error } = await supa.from("roster_defaults").select("*");
   if (error) throw error;
   return (data || []).map((r) => ({ id: r.id, name: r.name, trade: r.trade, rate: Number(r.rate), unit: r.unit }));
 }
 export async function resetRosterToDefaults(defaults: Resource[], removeIds: string[]) {
+  await requireRole("admin");
   const supa = getSupabase();
   if (removeIds.length) {
     const { error } = await supa.from("resources").delete().in("id", removeIds);
@@ -201,8 +226,9 @@ export async function resetRosterToDefaults(defaults: Resource[], removeIds: str
   if (error) throw error;
 }
 
-/* bulk import (restore from JSON backup) */
+/* bulk import (restore from JSON backup) — admin only, touches everything including rates */
 export async function bulkReplaceState(s: AppState) {
+  await requireRole("admin");
   const supa = getSupabase();
   await supa.from("bookings").delete().neq("resource_id", "");
   await supa.from("areas").delete().neq("id", "00000000-0000-0000-0000-000000000000");

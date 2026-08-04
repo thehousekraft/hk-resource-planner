@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { UserButton } from "@clerk/nextjs";
 import type { AreaLine, BookingsMap, MaterialLine, Project, Resource } from "@/lib/types";
+import type { Role } from "@/lib/roles";
 import { blankProject } from "@/lib/calc";
 import * as actions from "@/app/actions";
 import Planner from "@/components/Planner";
@@ -13,6 +15,7 @@ import Roster from "@/components/Roster";
 
 const UI_KEY = "resPlanner.ui.v1";
 type Tab = "plan" | "pnl" | "dash" | "bench" | "daily" | "roster";
+const ADMIN_ONLY_TABS: Tab[] = ["pnl", "dash", "roster"];
 
 function loadUiPrefs(): { month?: string; current?: string } {
   try {
@@ -26,11 +29,15 @@ export default function App({
   initialRoster,
   initialProjects,
   initialBookings,
+  role,
 }: {
   initialRoster: Resource[];
   initialProjects: Project[];
   initialBookings: BookingsMap;
+  role: Role;
 }) {
+  const isAdmin = role === "admin";
+  const isViewer = role === "viewer";
   const [roster, setRoster] = useState<Resource[]>(initialRoster);
   const [projects, setProjects] = useState<Project[]>(initialProjects);
   const [bookings, setBookings] = useState<BookingsMap>(initialBookings);
@@ -350,6 +357,10 @@ export default function App({
             <input type="month" value={month} onChange={(e) => setMonth(e.target.value)} />
           </div>
           <span className={"save-dot" + (saved ? " show" : "")}>Saved ✓</span>
+          <span className="badge b-day" style={{ textTransform: "capitalize" }}>
+            {role}
+          </span>
+          <UserButton />
         </div>
       </header>
 
@@ -361,11 +372,13 @@ export default function App({
           ["bench", "Bench & utilisation"],
           ["daily", "Daily allocation (WhatsApp)"],
           ["roster", "Manage resources"],
-        ] as [Tab, string][]).map(([id, label]) => (
-          <button key={id} className={"tab" + (activeTab === id ? " active" : "")} onClick={() => setActiveTab(id)}>
-            {label}
-          </button>
-        ))}
+        ] as [Tab, string][])
+          .filter(([id]) => isAdmin || !ADMIN_ONLY_TABS.includes(id))
+          .map(([id, label]) => (
+            <button key={id} className={"tab" + (activeTab === id ? " active" : "")} onClick={() => setActiveTab(id)}>
+              {label}
+            </button>
+          ))}
       </div>
 
       <section className={"panel" + (activeTab === "plan" ? " active" : "")}>
@@ -374,6 +387,7 @@ export default function App({
           activeLoc={activeLoc}
           setActiveLoc={setActiveLoc}
           selection={selection}
+          readOnly={isViewer}
           onSetCurrent={setCurrent}
           onAddProject={addProject}
           onSetPrimary={setPrimary}
@@ -388,26 +402,30 @@ export default function App({
         />
       </section>
 
-      <section className={"panel" + (activeTab === "pnl" ? " active" : "")}>
-        <Pnl
-          state={state}
-          onSetCurrent={setCurrent}
-          onRename={renameProject}
-          onDelete={deleteProject}
-          onSetRevenue={setRevenue}
-          onAddMaterial={addMaterial}
-          onUpdateMaterial={updateMaterial}
-          onDeleteMaterial={deleteMaterial}
-          onEnsureArea={ensureAreaRow}
-          onAddArea={addArea}
-          onUpdateArea={updateArea}
-          onDeleteArea={deleteArea}
-        />
-      </section>
+      {isAdmin && (
+        <section className={"panel" + (activeTab === "pnl" ? " active" : "")}>
+          <Pnl
+            state={state}
+            onSetCurrent={setCurrent}
+            onRename={renameProject}
+            onDelete={deleteProject}
+            onSetRevenue={setRevenue}
+            onAddMaterial={addMaterial}
+            onUpdateMaterial={updateMaterial}
+            onDeleteMaterial={deleteMaterial}
+            onEnsureArea={ensureAreaRow}
+            onAddArea={addArea}
+            onUpdateArea={updateArea}
+            onDeleteArea={deleteArea}
+          />
+        </section>
+      )}
 
-      <section className={"panel" + (activeTab === "dash" ? " active" : "")}>
-        <Dashboard state={state} />
-      </section>
+      {isAdmin && (
+        <section className={"panel" + (activeTab === "dash" ? " active" : "")}>
+          <Dashboard state={state} />
+        </section>
+      )}
 
       <section className={"panel" + (activeTab === "bench" ? " active" : "")}>
         <Bench state={state} />
@@ -417,16 +435,18 @@ export default function App({
         <Daily state={state} />
       </section>
 
-      <section className={"panel" + (activeTab === "roster" ? " active" : "")}>
-        <Roster
-          state={state}
-          onAddPerson={addPerson}
-          onUpdatePerson={updatePerson}
-          onDeletePerson={deletePerson}
-          onReset={resetRoster}
-          onImport={importBackup}
-        />
-      </section>
+      {isAdmin && (
+        <section className={"panel" + (activeTab === "roster" ? " active" : "")}>
+          <Roster
+            state={state}
+            onAddPerson={addPerson}
+            onUpdatePerson={updatePerson}
+            onDeletePerson={deletePerson}
+            onReset={resetRoster}
+            onImport={importBackup}
+          />
+        </section>
+      )}
     </div>
   );
 }

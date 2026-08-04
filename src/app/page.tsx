@@ -1,33 +1,33 @@
-import { blankProject } from "@/lib/calc";
-import { ensureDefaultProject, loadState } from "./actions";
-import App from "@/components/App";
+import Link from "next/link";
+import { auth } from "@clerk/nextjs/server";
 
-export const dynamic = "force-dynamic";
+export default async function LandingPage() {
+  const { userId } = await auth();
 
-export default async function Page() {
-  let roster, projects, bookings;
-  try {
-    ({ roster, projects, bookings } = await loadState());
-  } catch (e) {
-    return (
-      <div className="wrap">
-        <div className="loaderr">
-          Could not load data from Supabase.
-          <br />
-          {e instanceof Error ? e.message : String(e)}
-          <br />
-          <br />
-          Check your connection and reload.
-        </div>
+  return (
+    <div className="wrap" style={{ maxWidth: 640, textAlign: "center", paddingTop: "12vh" }}>
+      <div className="brand">
+        <h1 style={{ fontSize: 34 }}>Resource Planner &amp; Project P&amp;L</h1>
+        <p style={{ fontSize: 15, marginTop: 10 }}>
+          Calendar bookings with OT and site/factory, double-booking guards, bench &amp; multi-month P&amp;L.
+        </p>
       </div>
-    );
-  }
-
-  if (!projects.length) {
-    const p = blankProject("Project 1", 0);
-    await ensureDefaultProject(p);
-    projects = [p];
-  }
-
-  return <App initialRoster={roster} initialProjects={projects} initialBookings={bookings} />;
+      <div className="card" style={{ marginTop: 32, display: "flex", justifyContent: "center", gap: 12, padding: 28 }}>
+        {userId ? (
+          <Link className="btn primary" href="/app">
+            Go to planner →
+          </Link>
+        ) : (
+          <>
+            <Link className="btn primary" href="/sign-in">
+              Sign in
+            </Link>
+            <Link className="btn" href="/sign-up">
+              Sign up
+            </Link>
+          </>
+        )}
+      </div>
+    </div>
+  );
 }
