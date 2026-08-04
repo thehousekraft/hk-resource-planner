@@ -17,6 +17,7 @@ export default function Roster({
   onUpdatePerson,
   onDeletePerson,
   onReset,
+  onClearAll,
   onImport,
 }: {
   state: AppState;
@@ -25,6 +26,7 @@ export default function Roster({
   onUpdatePerson: (id: string, patch: Partial<Resource>) => void;
   onDeletePerson: (id: string, name: string) => void;
   onReset: () => void;
+  onClearAll: () => void;
   onImport: (s: { roster: Resource[]; projects: Project[]; bookings: BookingsMap; month?: string; current?: string }) => void;
 }) {
   const { month, roster, projects, bookings } = state;
@@ -321,8 +323,11 @@ export default function Roster({
           Upload Excel
         </button>
         <input ref={excelInput} type="file" accept=".xlsx,.xls" hidden onChange={handleExcelUpload} />
+        <button className="btn sm warn" onClick={onClearAll}>
+          Clear all resources
+        </button>
         <span className="muted" style={{ fontSize: 12 }}>
-          Same format as Manpower.xlsx: Employee Name, Trade, Total cost/day (rate), and per day / per SQFT billing. Adds to the existing roster; rows without a name or rate are skipped.
+          Same format as Manpower.xlsx: Employee Name, Trade, Total cost/day (rate), and per day / per SQFT billing. Adds to the existing roster; rows without a name or rate are skipped — clear the roster first if re-uploading to avoid duplicates.
         </span>
       </div>
       <div className="row" style={{ marginTop: 18 }}>

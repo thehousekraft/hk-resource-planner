@@ -215,6 +215,12 @@ export async function deleteResource(id: string) {
   const { error } = await supa.from("resources").delete().eq("id", id);
   if (error) throw error;
 }
+export async function clearAllResources() {
+  await requireRole("admin");
+  const supa = getSupabase();
+  const { error } = await supa.from("resources").delete().neq("id", "");
+  if (error) throw error;
+}
 export async function getRosterDefaults(): Promise<Resource[]> {
   await requireRole("admin");
   const supa = getSupabase();

@@ -340,6 +340,23 @@ export default function App({
       fail(e);
     }
   }
+  async function clearRoster() {
+    if (
+      !confirm(
+        `Delete all ${roster.length} resources and their bookings? This cannot be undone. Use this before re-uploading an Excel file to avoid duplicates.`,
+      )
+    )
+      return;
+    try {
+      await actions.clearAllResources();
+      setRoster([]);
+      setBookings({});
+      setProjects((prev) => prev.map((p) => ({ ...p, areas: {} })));
+      markSaved();
+    } catch (e) {
+      fail(e);
+    }
+  }
   async function importBackup(s: { roster: Resource[]; projects: Project[]; bookings: BookingsMap; month?: string; current?: string }) {
     if (!confirm("This will REPLACE all data in the shared database with the contents of this file. Continue?")) return;
     try {
@@ -460,6 +477,7 @@ export default function App({
             onUpdatePerson={updatePerson}
             onDeletePerson={deletePerson}
             onReset={resetRoster}
+            onClearAll={clearRoster}
             onImport={importBackup}
           />
         </section>
