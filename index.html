@@ -1,0 +1,1006 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Resource Planner & Project P&L</title>
+<style>
+  :root{
+    --ink:#12151a; --ink-soft:#5a6070; --ink-faint:#9aa0ad; --line:#e4e6ea; --line-strong:#cbcfd7;
+    --paper:#f5f3ee; --card:#ffffff; --accent:#1f6f5c; --accent-soft:#e3f0eb;
+    --warn:#b23b3b; --warn-soft:#fbe9e9;
+    --shadow:0 1px 3px rgba(18,21,26,.05),0 10px 28px rgba(18,21,26,.05);
+    --wknd:#f0eee8;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--paper);color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Inter,sans-serif;font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased}
+  h1,h2,h3{margin:0;font-weight:650;letter-spacing:-.01em}
+  .wrap{max-width:1440px;margin:0 auto;padding:24px 22px 90px;transition:opacity .2s}
+  header.top{display:flex;align-items:flex-end;justify-content:space-between;gap:20px;flex-wrap:wrap;padding-bottom:16px;border-bottom:2px solid var(--ink)}
+  .brand h1{font-size:24px}.brand p{margin:3px 0 0;color:var(--ink-soft);font-size:13px}
+  input,select,button{font-family:inherit;font-size:14px;color:var(--ink)}
+  input[type=month],input[type=text],input[type=number],input[type=date],select{border:1px solid var(--line-strong);border-radius:8px;padding:8px 10px;background:var(--card)}
+  input:focus,select:focus{outline:2px solid var(--accent);outline-offset:1px}
+  .muted{color:var(--ink-soft)}
+  .tabs{display:flex;gap:2px;margin:20px 0 18px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+  .tab{padding:10px 15px;border:none;background:none;cursor:pointer;color:var(--ink-soft);font-weight:560;border-bottom:2px solid transparent;margin-bottom:-1px}
+  .tab.active{color:var(--ink);border-bottom-color:var(--accent)}
+  .panel{display:none}.panel.active{display:block}
+  .btn{border:1px solid var(--line-strong);background:var(--card);border-radius:8px;padding:8px 13px;cursor:pointer;font-weight:560;transition:.12s}
+  .btn:hover{border-color:var(--ink)}
+  .btn.primary{background:var(--accent);color:#fff;border-color:var(--accent)}.btn.primary:hover{background:#195b4b}
+  .btn.warn{color:var(--warn);border-color:var(--warn-soft)}.btn.warn:hover{border-color:var(--warn);background:var(--warn-soft)}
+  .btn.sm{padding:5px 10px;font-size:12.5px}.btn:disabled{opacity:.4;cursor:not-allowed}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);padding:20px;margin-bottom:18px}
+  .card h2{font-size:16px}.card .sub{color:var(--ink-soft);font-size:12.5px;margin:2px 0 16px}
+  .row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}.spacer{margin-left:auto}
+  .save-dot{font-size:12px;color:var(--accent);opacity:0;transition:.3s}.save-dot.show{opacity:1}
+  .fldlabel{font-size:11px;color:var(--ink-soft);text-transform:uppercase;letter-spacing:.05em;display:block;margin-bottom:3px}
+
+  .legend{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  .legchip{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;padding:4px 10px;border-radius:20px;border:1px solid var(--line);cursor:pointer;background:var(--card)}
+  .legchip .sw{width:12px;height:12px;border-radius:3px}.legchip.active{border-color:var(--ink);font-weight:600}
+
+  /* segmented toggle */
+  .seg{display:inline-flex;border:1px solid var(--line-strong);border-radius:8px;overflow:hidden}
+  .seg button{border:none;background:var(--card);padding:7px 14px;cursor:pointer;font-weight:560;font-size:12.5px;color:var(--ink-soft)}
+  .seg button.on{background:var(--ink);color:#fff}
+
+  .planner-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:12px;background:var(--card)}
+  table.cal{border-collapse:collapse;width:100%;min-width:760px;user-select:none}
+  table.cal th,table.cal td{border:1px solid var(--line);padding:0}
+  .cal thead th{position:sticky;top:0;background:#faf9f6;z-index:3;font-size:11px;font-weight:600;color:var(--ink-soft);height:40px;min-width:30px}
+  .cal thead th.wknd{background:var(--wknd)}
+  .cal th.namecol{position:sticky;left:0;z-index:5;background:#faf9f6;text-align:left;padding:8px 10px;min-width:210px;box-shadow:1px 0 0 var(--line)}
+  .cal td.namecol{position:sticky;left:0;z-index:2;background:var(--card);padding:5px 10px;box-shadow:1px 0 0 var(--line)}
+  .cal td.namecol.ot{padding-top:2px}
+  .cal td.namecol .nm{font-weight:560;font-size:13px}
+  .cal td.namecol .tr{font-size:11px;color:var(--ink-faint)}
+  .rowtag{font-size:9.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;padding:1px 6px;border-radius:4px;display:inline-block}
+  .rowtag.prim{background:#e6eef6;color:#2d5f8a}.rowtag.ot{background:#f6ecd9;color:#8a6d1f}
+  .daynum{font-size:12px;font-weight:640;line-height:1}.dow{font-size:9px;font-weight:600;color:var(--ink-faint);text-transform:uppercase}
+  .cell{height:30px;cursor:pointer;position:relative}
+  .cell.wknd{background:var(--wknd)}
+  .cell.other{cursor:not-allowed}
+  .cell.mine::after,.cell.other::after{content:'';position:absolute;inset:3px;border-radius:3px;background:var(--_pc)}
+  .cell.other::after{opacity:.32}
+  .cell.mine.fac::before,.cell.other.fac::before{content:'F';position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:800;color:#fff;z-index:1}
+  .cell.today{box-shadow:inset 0 0 0 2px var(--ink)}
+  .cell:hover:not(.other){filter:brightness(.93)}
+  .cell.sel::after{outline:2px solid var(--ink);outline-offset:-2px}
+  .rowtot{font-size:12px;font-variant-numeric:tabular-nums;text-align:right;padding:5px 10px;background:var(--card);min-width:64px;white-space:nowrap}
+  .otrow td.cell{height:22px}
+  .cell.otcell .othr{position:relative;z-index:2;display:flex;align-items:center;justify-content:center;height:100%;font-size:11px;font-weight:800;color:#fff}
+  .cell.otcell.noprim{background:repeating-linear-gradient(45deg,transparent,transparent 3px,rgba(120,120,120,.09) 3px,rgba(120,120,120,.09) 6px);cursor:not-allowed}
+  .cell.otcell.noprim:hover{filter:none}
+
+  .planner-toolbar{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
+  .hint{font-size:12px;color:var(--ink-soft);margin-bottom:10px}
+  .badge{display:inline-block;font-size:10.5px;padding:1px 7px;border-radius:5px;font-weight:600;margin-left:5px}
+  .b-sqft{background:#f1e8f4;color:#7a4a86}.b-day{background:#e6eef6;color:#2d5f8a}
+  .selinfo{background:var(--accent-soft);color:var(--accent);border-radius:8px;padding:7px 12px;font-size:12.5px;font-weight:560}
+
+  .rtable{width:100%;border-collapse:collapse}
+  .rtable th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--ink-soft);font-weight:600;padding:8px 10px;border-bottom:1px solid var(--line)}
+  .rtable td{padding:6px 10px;border-bottom:1px solid var(--line)}
+  .rtable input,.rtable select{padding:5px 8px;width:100%}.rtable td.narrow{width:120px}
+  .addrow{display:grid;grid-template-columns:1.4fr 1.2fr .9fr 1fr auto;gap:8px;align-items:end;margin-top:14px}
+  .fld label{display:block;font-size:11px;color:var(--ink-soft);margin-bottom:3px;text-transform:uppercase;letter-spacing:.04em}.fld input,.fld select{width:100%}
+
+  .area-block{border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin-bottom:12px}
+  .area-block h3{font-size:13.5px;margin-bottom:2px}.area-block .who{font-size:11.5px;color:var(--ink-faint);margin-bottom:10px}
+  .area-row{display:grid;grid-template-columns:1fr 120px 130px 40px;gap:8px;align-items:center;margin-bottom:6px}
+  .area-row .ai{font-size:11px;color:var(--ink-soft)}
+  .del-x{border:none;background:none;color:var(--warn);cursor:pointer;font-size:17px;border-radius:6px}.del-x:hover{background:var(--warn-soft)}
+  .area-cost{text-align:right;font-variant-numeric:tabular-nums;font-weight:560}
+  .mat-row{display:grid;grid-template-columns:1fr 150px 40px;gap:10px;margin-bottom:8px;align-items:center}
+  .mat-head{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--ink-soft);font-weight:600}
+
+  .phase-row{display:grid;grid-template-columns:1fr 150px 150px 40px;gap:8px;align-items:center;margin-bottom:6px}
+  .rev-grid{display:grid;grid-template-columns:1fr 220px;gap:10px;align-items:center;max-width:520px}
+
+  .sumstrip{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:1px;background:var(--line);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+  .sumstrip .cell2{background:var(--card);padding:13px 15px}
+  .sumstrip .k{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--ink-soft)}
+  .sumstrip .v{font-size:19px;font-weight:680;font-variant-numeric:tabular-nums;margin-top:3px}
+  .v.pos{color:var(--accent)}.v.neg{color:var(--warn)}
+
+  .dash-table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
+  .dash-table th{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--ink-soft);font-weight:600;padding:10px;border-bottom:2px solid var(--line-strong);text-align:right}
+  .dash-table th:first-child{text-align:left}
+  .dash-table td{padding:10px;border-bottom:1px solid var(--line);text-align:right}.dash-table td:first-child{text-align:left;font-weight:560}
+  .dash-table tr.total td{border-top:2px solid var(--ink);border-bottom:none;font-weight:700;font-size:15px}
+  .pill{display:inline-block;padding:2px 9px;border-radius:20px;font-size:12px;font-weight:640}
+  .pill.pos{background:var(--accent-soft);color:var(--accent)}.pill.neg{background:var(--warn-soft);color:var(--warn)}
+  .util-bar{height:6px;border-radius:4px;background:var(--line);overflow:hidden;margin-top:4px;min-width:80px}
+  .util-bar>i{display:block;height:100%;border-radius:4px}
+  .empty{text-align:center;color:var(--ink-soft);padding:34px}
+  .dblock{border:1px solid var(--line);border-radius:10px;margin-bottom:12px;overflow:hidden}
+  .dblock-head{display:flex;align-items:center;gap:10px;padding:8px 12px;background:#faf9f6;border-bottom:1px solid var(--line)}
+  .dblock-head .gname{font-weight:640;font-size:13.5px}
+  .dblock-head .gcount{font-size:11.5px;color:var(--ink-faint)}
+  .dblock pre{white-space:pre-wrap;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;line-height:1.55;padding:14px;margin:0;background:var(--card)}
+  .copied-mini{font-size:11.5px;color:var(--accent);opacity:0;transition:.3s}.copied-mini.show{opacity:1}
+
+  .modal-bg{position:fixed;inset:0;background:rgba(18,21,26,.4);display:none;align-items:center;justify-content:center;z-index:50}
+  .modal-bg.show{display:flex}
+  .modal{background:var(--card);border-radius:14px;padding:22px;max-width:440px;width:92%;box-shadow:var(--shadow)}
+  .modal h3{font-size:16px;margin-bottom:6px}.modal p{font-size:13px;color:var(--ink-soft);margin:0 0 16px}.modal .row{justify-content:flex-end;margin-top:18px}
+  .loaderr{max-width:640px;margin:60px auto;text-align:center;color:var(--warn);font-size:14px}
+</style>
+<script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+<div class="wrap" id="wrap" style="opacity:.35;pointer-events:none">
+  <header class="top">
+    <div class="brand"><h1>Resource Planner &amp; Project P&amp;L</h1>
+      <p>Calendar bookings with OT and site/factory, double-booking guards, bench &amp; multi-month P&amp;L.</p></div>
+    <div class="row">
+      <div><span class="fldlabel">Planner month</span><input type="month" id="month"></div>
+      <span class="save-dot" id="saveDot">Saved ✓</span>
+    </div>
+  </header>
+
+  <div class="tabs">
+    <button class="tab active" data-tab="plan">Calendar planner</button>
+    <button class="tab" data-tab="pnl">Activity/Project P&amp;L</button>
+    <button class="tab" data-tab="dash">Portfolio dashboard</button>
+    <button class="tab" data-tab="bench">Bench &amp; utilisation</button>
+    <button class="tab" data-tab="daily">Daily allocation (WhatsApp)</button>
+    <button class="tab" data-tab="roster">Manage resources</button>
+  </div>
+
+  <!-- PLANNER -->
+  <section class="panel active" id="panel-plan">
+    <div class="card">
+      <div class="planner-toolbar">
+        <div class="legend" id="legend"></div>
+        <button class="btn sm" id="newProjPlan">+ New project</button>
+        <span style="width:1px;height:22px;background:var(--line)"></span>
+        <span class="fldlabel" style="margin:0">Book at</span>
+        <div class="seg" id="locSeg"><button data-loc="site" class="on">Site</button><button data-loc="factory">Factory</button></div>
+        <div class="spacer"></div>
+        <span class="selinfo" id="selInfo" style="display:none"></span>
+        <button class="btn sm" id="moveBtn" style="display:none">Move selected →</button>
+        <button class="btn sm" id="clearSelBtn" style="display:none">Clear</button>
+      </div>
+      <div class="hint">
+        Each resource has a <b>Primary</b> row (10am–6pm, 8h) and an <b>OT</b> row (from 6pm, 1-hour blocks). Pick the active project (legend) and Site/Factory, then <b>click-drag</b> the primary row to book; click a booked day to unbook.
+        On the OT row, <b>click a day to add OT hours</b> (cycles 0→5); OT needs a primary that day (can be a different project). Cells owned by other projects are blocked. <b>F</b> marks factory. Shift-click your cells to select them, then Move.
+      </div>
+      <div class="planner-wrap"><table class="cal"><thead id="calHead"></thead><tbody id="calBody"></tbody></table></div>
+    </div>
+  </section>
+
+  <!-- P&L -->
+  <section class="panel" id="panel-pnl">
+    <div class="card">
+      <div class="row">
+        <div><span class="fldlabel">Project</span><select id="pnlProj"></select></div>
+        <div style="flex:1;min-width:180px"><span class="fldlabel">Rename</span><input type="text" id="pnlName" style="width:100%"></div>
+        <button class="btn warn sm spacer" id="delProj" style="align-self:flex-end">Delete project</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Day-rate labour <span class="muted" style="font-weight:400;font-size:13px">(all months)</span></h2>
+      <div class="sub">Primary = mandays × rate. OT = OT-days × 3/8 × rate. Site/Factory split shown per person.</div>
+      <div id="dayLabour"></div>
+    </div>
+
+    <div class="card">
+      <h2>Sqft labour <span class="muted" style="font-weight:400;font-size:13px">(area-wise)</span></h2>
+      <div class="sub">Contract trades are cost-driven by area sqft. Their calendar days still block their time.</div>
+      <div id="sqftLabour"></div>
+    </div>
+
+    <div class="card">
+      <h2>Material cost</h2>
+      <div class="sub">Material line items for this project.</div>
+      <div class="mat-row mat-head"><div>Item</div><div>Cost</div><div></div></div>
+      <div id="matRows"></div>
+      <button class="btn sm" id="addMat">+ Add material</button>
+    </div>
+
+    <div class="card">
+      <h2>Revenue</h2><div class="sub">Client-billed / quoted value for this project.</div>
+      <div class="rev-grid"><label for="revInput">Project revenue</label><input type="number" id="revInput" min="0" step="1000" placeholder="0"></div>
+    </div>
+
+    <div class="card">
+      <h2>Activity / Project P&amp;L</h2><div class="sub" id="pnlSub"></div>
+      <div class="sumstrip" id="pnlSummary"></div>
+    </div>
+  </section>
+
+  <!-- DASHBOARD -->
+  <section class="panel" id="panel-dash">
+    <div class="card">
+      <h2>Portfolio P&amp;L <span class="muted" style="font-weight:400;font-size:13px">(all months, all projects)</span></h2>
+      <div class="sub" id="dashSub"></div>
+      <div class="sumstrip" id="portSummary" style="margin-bottom:22px"></div>
+      <div style="overflow-x:auto"><table class="dash-table">
+        <thead><tr><th>Project</th><th>Primary</th><th>OT</th><th>Sqft</th><th>Material</th><th>Total cost</th><th>Revenue</th><th>Profit</th><th>Margin</th></tr></thead>
+        <tbody id="dashBody"></tbody></table></div>
+    </div>
+  </section>
+
+  <!-- BENCH -->
+  <section class="panel" id="panel-bench">
+    <div class="card">
+      <h2>Bench &amp; utilisation <span class="muted" style="font-weight:400;font-size:13px">(selected month)</span></h2>
+      <div class="sub" id="benchSub"></div>
+      <div class="sumstrip" id="benchSummary" style="margin-bottom:22px"></div>
+      <div class="row" style="margin-bottom:12px">
+        <span class="fldlabel" style="margin:0">Working days count</span>
+        <div class="seg" id="wdSeg"><button data-wd="mon-sat" class="on">Mon–Sat</button><button data-wd="mon-fri">Mon–Fri</button><button data-wd="all">All days</button></div>
+        <span class="muted" style="font-size:12px">Bench = working days with no primary booking anywhere.</span>
+      </div>
+      <div style="overflow-x:auto"><table class="dash-table">
+        <thead><tr><th>Resource</th><th>Trade</th><th>Booked days</th><th>Bench days</th><th>OT hrs</th><th>Utilisation</th></tr></thead>
+        <tbody id="benchBody"></tbody></table></div>
+    </div>
+  </section>
+
+  <!-- DAILY WHATSAPP -->
+  <section class="panel" id="panel-daily">
+    <div class="card">
+      <h2>Daily allocation &mdash; trade-wise</h2>
+      <div class="sub">Pick a date, then copy a clean text summary to paste into your site WhatsApp group. Grouped by trade, showing who is where (site/factory) and OT.</div>
+      <div class="row" style="margin-bottom:14px">
+        <div><span class="fldlabel">Date</span><input type="date" id="dailyDate"></div>
+        <button class="btn sm" id="dailyPrev">← Prev day</button>
+        <button class="btn sm" id="dailyNext">Next day →</button>
+        <button class="btn primary sm spacer" id="copyAll">Copy all blocks</button>
+        <span class="save-dot" id="copyDot" style="color:var(--accent)">Copied ✓</span>
+      </div>
+      <div id="dailyBlocks"></div>
+    </div>
+  </section>
+
+  <!-- ROSTER -->
+  <section class="panel" id="panel-roster">
+    <div class="card">
+      <h2>Manage resources</h2>
+      <div class="sub">Add or remove people. Edits persist and flow into the planner. Deleting clears their bookings.</div>
+      <div style="overflow-x:auto"><table class="rtable">
+        <thead><tr><th>Name</th><th>Trade</th><th class="narrow">Billing</th><th class="narrow">Rate</th><th style="width:40px"></th></tr></thead>
+        <tbody id="rosterBody"></tbody></table></div>
+      <div class="addrow">
+        <div class="fld"><label>Name</label><input type="text" id="newName" placeholder="Full name"></div>
+        <div class="fld"><label>Trade</label><input type="text" id="newTrade" placeholder="e.g. Sn Carpenter"></div>
+        <div class="fld"><label>Billing</label><select id="newUnit"><option value="day">Per day</option><option value="sqft">Per sqft</option></select></div>
+        <div class="fld"><label>Rate</label><input type="number" id="newRate" placeholder="0" min="0"></div>
+        <button class="btn primary" id="addPerson">Add</button>
+      </div>
+      <div class="row" style="margin-top:18px">
+        <button class="btn primary sm" id="exportXlsx">Export to Excel</button>
+        <button class="btn sm" id="exportBtn">Export all data (JSON)</button>
+        <button class="btn sm" id="importBtn">Import</button>
+        <input type="file" id="importFile" accept="application/json" hidden>
+        <button class="btn sm warn spacer" id="resetBtn">Reset to Manpower defaults</button>
+      </div>
+    </div>
+  </section>
+</div>
+
+<div class="modal-bg" id="moveModal"><div class="modal">
+  <h3>Move booked days to another project</h3>
+  <p id="moveDesc"></p>
+  <div class="fld"><label>Target project</label><select id="moveTarget"></select></div>
+  <div class="row"><button class="btn" id="moveCancel">Cancel</button><button class="btn primary" id="moveConfirm">Move days</button></div>
+</div></div>
+
+<script>
+/* ===== SUPABASE ===== */
+const SUPABASE_URL='https://ofvazbhuvwdrrbfeqhii.supabase.co';
+const SUPABASE_ANON_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9mdmF6Ymh1dndkcnJiZmVxaGlpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODU4MzAzMjgsImV4cCI6MjEwMTQwNjMyOH0.11fmjEUDTMJ6YLI-PuKC863qCR7E5Rj9TcaNaPXgd5k';
+const supa=window.supabase.createClient(SUPABASE_URL,SUPABASE_ANON_KEY);
+
+/* default roster used only by "Reset to Manpower defaults" */
+const SEED = [{"id": "r1", "name": "Sanjay kumar", "trade": "Sn Carpenter", "rate": 1809.91, "unit": "day"}, {"id": "r2", "name": "Vikas kumar", "trade": "Jn Carpenter", "rate": 1287.76, "unit": "day"}, {"id": "r3", "name": "Gobari or laalbabu", "trade": "Sn Carpenter", "rate": 1809.91, "unit": "day"}, {"id": "r4", "name": "Dip Narayan Thakur", "trade": "Sn Carpenter", "rate": 1505.32, "unit": "day"}, {"id": "r5", "name": "Ganesh", "trade": "Jn Carpenter", "rate": 939.66, "unit": "day"}, {"id": "r6", "name": "Pintu", "trade": "Sn Electrician/Plumber", "rate": 1505.32, "unit": "day"}, {"id": "r7", "name": "Anil Kantiwal", "trade": "Sn Electrician/Plumber", "rate": 1635.86, "unit": "day"}, {"id": "r8", "name": "Madhusudan Verma Tony", "trade": "Jr Electrician", "rate": 1070.19, "unit": "day"}, {"id": "r9", "name": "Vishal Saini", "trade": "Electrician", "rate": 1287.76, "unit": "day"}, {"id": "r10", "name": "Tushar Saini", "trade": "Helper Electrician", "rate": 896.14, "unit": "day"}, {"id": "r11", "name": "Jinesh K S", "trade": "Sn Polishman", "rate": 1543.78, "unit": "day"}, {"id": "r12", "name": "Sumesh V", "trade": "Painter", "rate": 1287.76, "unit": "day"}, {"id": "r13", "name": "Sheenu S", "trade": "Sn Polishman", "rate": 1505.32, "unit": "day"}, {"id": "r14", "name": "Anish (Mangesh)", "trade": "Sn Painter", "rate": 1505.32, "unit": "day"}, {"id": "r15", "name": "Vinesh", "trade": "Sn Painter", "rate": 1505.32, "unit": "day"}, {"id": "r16", "name": "Vinod N", "trade": "Painter", "rate": 1287.76, "unit": "day"}, {"id": "r17", "name": "Susanta Kumar Behera", "trade": "Sn Polishman", "rate": 1505.32, "unit": "day"}, {"id": "r18", "name": "Vineesh TV", "trade": "Painter", "rate": 1409.17, "unit": "day"}, {"id": "r19", "name": "Bhagwan Takur", "trade": "Painter", "rate": 1409.17, "unit": "day"}, {"id": "r20", "name": "Mustaq Ahmed", "trade": "Site Management", "rate": 2544.2, "unit": "day"}, {"id": "r21", "name": "Touheed Khan", "trade": "Site Management", "rate": 1484.12, "unit": "day"}, {"id": "r22", "name": "Keerthesh N", "trade": "Site Management", "rate": 1484.12, "unit": "day"}, {"id": "r23", "name": "Prasanna", "trade": "Site Management", "rate": 1272.1, "unit": "day"}, {"id": "r24", "name": "Deepak Raj Shetty", "trade": "Service Management", "rate": 1144.89, "unit": "day"}, {"id": "r25", "name": "Abhishek", "trade": "Site Management", "rate": 636.05, "unit": "day"}, {"id": "r26", "name": "Zubair", "trade": "Sn Assembler", "rate": 110, "unit": "sqft"}, {"id": "r27", "name": "Zawar", "trade": "Jn Assembler", "rate": 110, "unit": "sqft"}, {"id": "r28", "name": "Shaik", "trade": "Jn Assembler", "rate": 110, "unit": "sqft"}, {"id": "r29", "name": "Shafi", "trade": "Sn Assembler", "rate": 110, "unit": "sqft"}, {"id": "r30", "name": "Abdul", "trade": "Jn Assembler", "rate": 110, "unit": "sqft"}, {"id": "r31", "name": "Ram", "trade": "Jn Assembler", "rate": 110, "unit": "sqft"}, {"id": "r32", "name": "Nakul", "trade": "Jn Assembler", "rate": 110, "unit": "sqft"}, {"id": "r33", "name": "Uttam PoP", "trade": "Gypsum", "rate": 25, "unit": "sqft"}, {"id": "r34", "name": "Manoj", "trade": "Gypsum", "rate": 25, "unit": "sqft"}, {"id": "r35", "name": "Ram", "trade": "Gypsum", "rate": 25, "unit": "sqft"}, {"id": "r36", "name": "Santosh", "trade": "Gypsum", "rate": 25, "unit": "sqft"}, {"id": "r37", "name": "Helper 1", "trade": "Helper", "rate": 10, "unit": "sqft"}, {"id": "r38", "name": "Helper 2", "trade": "Helper", "rate": 10, "unit": "sqft"}, {"id": "r39", "name": "Helper 3", "trade": "Helper", "rate": 10, "unit": "sqft"}, {"id": "r40", "name": "Helper 4", "trade": "Helper", "rate": 10, "unit": "sqft"}, {"id": "r41", "name": "Mujamil Zari", "trade": "QC", "rate": 1692.31, "unit": "day"}];
+const PALETTE=['#1f6f5c','#2d5f8a','#a8562a','#7a4a86','#3f7d3f','#b23b3b','#8a6d1f','#4a5568','#307a7a','#9a4a6a'];
+const CUR=new Intl.NumberFormat('en-IN',{style:'currency',currency:'INR',maximumFractionDigits:0});
+const NUM=new Intl.NumberFormat('en-IN',{maximumFractionDigits:1});
+const UI_KEY='resPlanner.ui.v1'; // local-only: last viewed month + active project (not shared data)
+const OT_HR_FRAC=1/8;   // each OT hour = 1/8 of a day rate
+const OT_MAX=5;         // max OT hours per day
+
+let state=null;
+
+function blankProject(name,i){
+  const idx=(typeof i==='number')?i:(state?.projects?.length||0);
+  return {id:'p'+Date.now().toString(36)+Math.random().toString(36).slice(2,5),
+    name:name||'New project',color:PALETTE[idx%PALETTE.length],
+    materials:[],revenue:0,areas:{}};
+}
+
+function debounce(fn,ms){let t;return (...a)=>{clearTimeout(t);t=setTimeout(()=>fn(...a),ms);};}
+function sbFail(err){console.error(err);alert('Could not save to the database:\n'+(err&&err.message?err.message:err));}
+
+let st=null;
+function markSaved(){const d=document.getElementById('saveDot');d.classList.add('show');clearTimeout(st);st=setTimeout(()=>d.classList.remove('show'),900);}
+function loadUiPrefs(){try{return JSON.parse(localStorage.getItem(UI_KEY))||{};}catch(e){return {};}}
+function saveUiPrefs(){localStorage.setItem(UI_KEY,JSON.stringify({month:state.month,current:state.current}));}
+function save(){markSaved();saveUiPrefs();} // kept name for minimal diff at UI-only call sites
+
+const curProj=()=>state.projects.find(p=>p.id===state.current)||state.projects[0];
+const isSqft=p=>p.unit==='sqft';
+const bkey=(date,resId,band)=>date+'|'+resId+'|'+band;
+
+/* pull the full dataset from Supabase into the same in-memory shape the UI expects */
+async function loadState(){
+  const [{data:resources,error:e1},{data:projRows,error:e2},{data:matRows,error:e3},{data:areaRows,error:e4},{data:bkRows,error:e5}]=await Promise.all([
+    supa.from('resources').select('*').order('id'),
+    supa.from('projects').select('*').order('created_at'),
+    supa.from('materials').select('*'),
+    supa.from('areas').select('*'),
+    supa.from('bookings').select('*'),
+  ]);
+  const err=e1||e2||e3||e4||e5;
+  if(err)throw err;
+
+  const roster=(resources||[]).map(r=>({id:r.id,name:r.name,trade:r.trade,rate:Number(r.rate),unit:r.unit}));
+  const projects=(projRows||[]).map(p=>({id:p.id,name:p.name,color:p.color,revenue:Number(p.revenue)||0,materials:[],areas:{}}));
+  const byId={};projects.forEach(p=>byId[p.id]=p);
+  (matRows||[]).forEach(m=>{const p=byId[m.project_id];if(p)p.materials.push({id:m.id,item:m.item||'',cost:Number(m.cost)||0});});
+  (areaRows||[]).forEach(a=>{const p=byId[a.project_id];if(!p)return;if(!p.areas[a.resource_id])p.areas[a.resource_id]=[];p.areas[a.resource_id].push({id:a.id,area:a.area_name||'',sqft:Number(a.sqft)||0});});
+  const bookings={};
+  (bkRows||[]).forEach(b=>{bookings[bkey(b.date,b.resource_id,b.band)]={proj:b.project_id,loc:b.loc,hrs:b.hrs||undefined};});
+
+  if(!projects.length){
+    const p=blankProject('Project 1',0);
+    projects.push(p);
+    const {error}=await supa.from('projects').insert({id:p.id,name:p.name,color:p.color,revenue:0});
+    if(error)throw error;
+  }
+
+  const ui=loadUiPrefs();
+  const current=(ui.current&&byId[ui.current])?ui.current:projects[0].id;
+  const month=ui.month||new Date().toISOString().slice(0,7);
+
+  return {month,roster,projects,current,bookings};
+}
+
+async function bulkReplaceState(s){
+  await supa.from('bookings').delete().neq('resource_id','');
+  await supa.from('areas').delete().neq('id','00000000-0000-0000-0000-000000000000');
+  await supa.from('materials').delete().neq('id','00000000-0000-0000-0000-000000000000');
+  await supa.from('projects').delete().neq('id','');
+  await supa.from('resources').delete().neq('id','');
+  if(s.roster&&s.roster.length)await supa.from('resources').insert(s.roster.map(p=>({id:p.id,name:p.name,trade:p.trade,rate:p.rate,unit:p.unit})));
+  if(s.projects&&s.projects.length)await supa.from('projects').insert(s.projects.map(p=>({id:p.id,name:p.name,color:p.color,revenue:p.revenue||0})));
+  const matRows=[],areaRows=[];
+  (s.projects||[]).forEach(p=>{
+    (p.materials||[]).forEach(m=>matRows.push({id:m.id||crypto.randomUUID(),project_id:p.id,item:m.item||'',cost:m.cost||0}));
+    Object.entries(p.areas||{}).forEach(([resId,list])=>list.forEach(a=>areaRows.push({id:a.id||crypto.randomUUID(),project_id:p.id,resource_id:resId,area_name:a.area||'',sqft:a.sqft||0})));
+  });
+  if(matRows.length)await supa.from('materials').insert(matRows);
+  if(areaRows.length)await supa.from('areas').insert(areaRows);
+  const bkRows=Object.entries(s.bookings||{}).map(([k,b])=>{const[date,resId,band]=k.split('|');const row={date,resource_id:resId,band,project_id:b.proj,loc:b.loc};if(band==='O')row.hrs=b.hrs;return row;});
+  if(bkRows.length)await supa.from('bookings').insert(bkRows);
+}
+
+let activeLoc='site';
+
+/* month helpers */
+function daysOfMonth(mo){
+  const [y,m]=mo.split('-').map(Number);const n=new Date(y,m,0).getDate();const arr=[];
+  for(let d=1;d<=n;d++){const dt=new Date(y,m-1,d);
+    arr.push({d,date:`${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`,dow:dt.getDay(),dowLbl:['S','M','T','W','T','F','S'][dt.getDay()]});}
+  return arr;
+}
+const todayStr=new Date().toISOString().slice(0,10);
+
+/* count bookings across ALL months for P&L */
+function countBand(resId,projId,band){
+  let n=0;const suf='|'+resId+'|'+band;
+  for(const k in state.bookings){if(k.endsWith(suf)&&state.bookings[k].proj===projId)n++;}
+  return n;
+}
+function countBandLoc(resId,projId,band,loc){
+  let n=0;const suf='|'+resId+'|'+band;
+  for(const k in state.bookings){const b=state.bookings[k];if(k.endsWith(suf)&&b.proj===projId&&b.loc===loc)n++;}
+  return n;
+}
+/* month-scoped for row totals */
+function countBandMonth(resId,projId,band,mo){
+  let n=0;const suf='|'+resId+'|'+band;
+  for(const k in state.bookings){if(k.endsWith(suf)&&k.slice(0,7)===mo&&state.bookings[k].proj===projId)n++;}
+  return n;
+}
+/* OT hours: bookings for band 'O' carry {proj,loc,hrs} — sum hrs across all months */
+function sumOtHours(resId,projId){
+  let h=0;const suf='|'+resId+'|O';
+  for(const k in state.bookings){const b=state.bookings[k];if(k.endsWith(suf)&&b.proj===projId)h+=(b.hrs||0);}
+  return h;
+}
+/* OT hours for a specific day/res regardless of project */
+function otHoursDay(date,resId){const b=state.bookings[bkey(date,resId,'O')];return b?(b.hrs||0):0;}
+/* does this resource have any primary booking on this date (any project)? */
+function hasPrimaryDay(date,resId){return !!state.bookings[bkey(date,resId,'P')];}
+
+/* TABS */
+document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{
+  document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
+  document.querySelectorAll('.panel').forEach(x=>x.classList.remove('active'));
+  t.classList.add('active');document.getElementById('panel-'+t.dataset.tab).classList.add('active');
+  if(t.dataset.tab==='pnl')renderPnl();
+  if(t.dataset.tab==='dash')renderDash();
+  if(t.dataset.tab==='bench')renderBench();
+  if(t.dataset.tab==='daily')renderDaily();
+  if(t.dataset.tab==='roster')renderRoster();
+});
+
+/* MONTH */
+const monthEl=document.getElementById('month');
+monthEl.onchange=()=>{state.month=monthEl.value;save();renderPlanner();renderPnl();renderDash();renderBench();};
+
+/* LOC SEG */
+document.getElementById('locSeg').querySelectorAll('button').forEach(b=>b.onclick=()=>{
+  activeLoc=b.dataset.loc;document.querySelectorAll('#locSeg button').forEach(x=>x.classList.toggle('on',x===b));
+});
+
+/* LEGEND */
+function renderLegend(){
+  const wrap=document.getElementById('legend');wrap.innerHTML='';
+  state.projects.forEach(p=>{const c=document.createElement('button');c.className='legchip'+(p.id===state.current?' active':'');
+    c.innerHTML=`<span class="sw" style="background:${p.color}"></span>${p.name}`;
+    c.onclick=()=>{state.current=p.id;save();renderPlanner();};wrap.appendChild(c);});
+}
+document.getElementById('newProjPlan').onclick=()=>{
+  const p=blankProject('Project '+(state.projects.length+1));
+  state.projects.push(p);state.current=p.id;save();renderPlanner();
+  supa.from('projects').insert({id:p.id,name:p.name,color:p.color,revenue:0}).then(({error})=>{if(error)sbFail(error);});
+};
+
+/* PLANNER */
+let selection=new Set();let dragging=false,dragMode=null,dragBand=null;
+function renderPlanner(){
+  renderLegend();
+  const days=daysOfMonth(state.month);
+  document.getElementById('calHead').innerHTML='<tr><th class="namecol">Resource</th>'+
+    days.map(d=>`<th class="${d.dow===0||d.dow===6?'wknd':''}"><div class="dow">${d.dowLbl}</div><div class="daynum">${d.d}</div></th>`).join('')+
+    '<th class="rowtot" style="background:#faf9f6">Days</th></tr>';
+  const body=document.getElementById('calBody');body.innerHTML='';
+  state.roster.forEach(p=>{
+    ['P','O'].forEach(band=>{
+      const tr=document.createElement('tr');if(band==='O')tr.className='otrow';
+      let namecell = band==='P'
+        ? `<td class="namecol"><div class="nm">${p.name}<span class="badge ${isSqft(p)?'b-sqft':'b-day'}">${isSqft(p)?'sqft':'day'}</span></div><div class="tr">${p.trade} <span class="rowtag prim">Primary</span></div></td>`
+        : `<td class="namecol ot"><div class="tr" style="padding-left:2px"><span class="rowtag ot">OT (hrs)</span></div></td>`;
+      let cells=namecell,mine=0,rowh=0;
+      days.forEach(d=>{
+        const key=bkey(d.date,p.id,band);const b=state.bookings[key];
+        let cls='cell',style='',inner='';
+        if(d.dow===0||d.dow===6)cls+=' wknd';
+        if(d.date===todayStr)cls+=' today';
+        if(band==='O'){
+          cls+=' otcell';
+          const primHere=hasPrimaryDay(d.date,p.id);
+          if(!primHere)cls+=' noprim';
+          if(b&&b.hrs){const op=state.projects.find(x=>x.id===b.proj);const col=op?op.color:'#999';
+            if(b.proj===state.current){cls+=' mine';if(selection.has(key))cls+=' sel';}else cls+=' other';
+            if(b.loc==='factory')cls+=' fac';
+            style=`--_pc:${col}`;inner=`<span class="othr">${b.hrs}</span>`;rowh+=b.hrs;
+          }
+        } else {
+          if(b){const op=state.projects.find(x=>x.id===b.proj);const col=op?op.color:'#999';
+            if(b.proj===state.current){cls+=' mine';mine++;if(selection.has(key))cls+=' sel';}else cls+=' other';
+            if(b.loc==='factory')cls+=' fac';
+            style=`--_pc:${col}`;
+          }
+        }
+        cells+=`<td class="${cls}" style="${style}" data-date="${d.date}" data-res="${p.id}" data-band="${band}">${inner}</td>`;
+      });
+      cells+=`<td class="rowtot">${band==='P'?(mine||''):(rowh?rowh+'h':'')}</td>`;
+      tr.innerHTML=cells;body.appendChild(tr);
+    });
+  });
+  bindCells();updateSelBar();
+}
+function bindCells(){
+  document.getElementById('calBody').querySelectorAll('td.cell').forEach(td=>{
+    const date=td.dataset.date,res=td.dataset.res,band=td.dataset.band,key=bkey(date,res,band);
+    if(band==='O'){
+      td.onmousedown=e=>{
+        const b=state.bookings[key];
+        // shift-click selects an OT cell of current project for moving
+        if(e.shiftKey){if(b&&b.hrs&&b.proj===state.current){selection.has(key)?selection.delete(key):selection.add(key);save();renderPlanner();}return;}
+        if(b&&b.hrs&&b.proj!==state.current)return; // owned by other project, blocked
+        if(!hasPrimaryDay(date,res)){alert('OT needs a primary booking on this day first (it can be a different project).');return;}
+        let hrs=b?(b.hrs||0):0;
+        hrs=(hrs+1)%(OT_MAX+1); // cycle 0..OT_MAX
+        if(hrs===0){delete state.bookings[key];selection.delete(key);
+          supa.from('bookings').delete().eq('date',date).eq('resource_id',res).eq('band','O').then(({error})=>{if(error)sbFail(error);});
+        } else {
+          state.bookings[key]={proj:state.current,loc:activeLoc,hrs};
+          supa.from('bookings').upsert({date,resource_id:res,band:'O',project_id:state.current,loc:activeLoc,hrs},{onConflict:'date,resource_id,band'}).then(({error})=>{if(error)sbFail(error);});
+        }
+        save();renderPlanner();if(document.getElementById('panel-pnl').classList.contains('active'))renderPnl();
+        e.preventDefault();
+      };
+      return;
+    }
+    td.onmousedown=e=>{
+      const b=state.bookings[key];
+      if(b&&b.proj!==state.current)return;
+      if(e.shiftKey){if(b&&b.proj===state.current){selection.has(key)?selection.delete(key):selection.add(key);save();renderPlanner();}return;}
+      dragging=true;dragBand=band;dragMode=(b&&b.proj===state.current)?'remove':'add';
+      applyCell(date,res,band);e.preventDefault();
+    };
+    td.onmouseenter=()=>{if(dragging&&band===dragBand)applyCell(date,res,band);};
+  });
+  document.onmouseup=()=>{if(dragging){dragging=false;save();renderPlanner();if(document.getElementById('panel-pnl').classList.contains('active'))renderPnl();}};
+}
+function applyCell(date,res,band){
+  const key=bkey(date,res,band),b=state.bookings[key];
+  if(dragMode==='add'){
+    if(!b){
+      state.bookings[key]={proj:state.current,loc:activeLoc};
+      supa.from('bookings').upsert({date,resource_id:res,band:'P',project_id:state.current,loc:activeLoc},{onConflict:'date,resource_id,band'}).then(({error})=>{if(error)sbFail(error);});
+    }
+  } else {
+    if(b&&b.proj===state.current){
+      delete state.bookings[key];selection.delete(key);
+      supa.from('bookings').delete().eq('date',date).eq('resource_id',res).eq('band','P').then(({error})=>{if(error)sbFail(error);});
+      // primary removed -> clear this day's OT for this resource (OT requires a primary)
+      const ok=bkey(date,res,'O');if(state.bookings[ok]){delete state.bookings[ok];selection.delete(ok);
+        supa.from('bookings').delete().eq('date',date).eq('resource_id',res).eq('band','O').then(({error})=>{if(error)sbFail(error);});
+      }
+    }
+  }
+  // full repaint is cheap enough here and keeps OT guard shading correct
+  renderPlannerLight(date,res);
+}
+// lightweight: repaint just the touched primary cell; OT guard handled on mouseup rerender
+function renderPlannerLight(date,res){
+  const key=bkey(date,res,'P'),nb=state.bookings[key];
+  const td=document.querySelector(`td.cell[data-date="${date}"][data-res="${res}"][data-band="P"]`);
+  if(!td)return;const dow=new Date(date+'T00:00:00').getDay();
+  let cls='cell';if(dow===0||dow===6)cls+=' wknd';if(date===todayStr)cls+=' today';
+  if(nb){cls+=(nb.proj===state.current?' mine':' other');if(nb.loc==='factory')cls+=' fac';}
+  td.className=cls;td.setAttribute('style',nb?`--_pc:${state.projects.find(x=>x.id===nb.proj).color}`:'');
+}
+function updateSelBar(){
+  const info=document.getElementById('selInfo'),mv=document.getElementById('moveBtn'),cl=document.getElementById('clearSelBtn');
+  if(selection.size){info.style.display='';mv.style.display='';cl.style.display='';info.textContent=selection.size+' cell(s) selected';}
+  else{info.style.display='none';mv.style.display='none';cl.style.display='none';}
+}
+document.getElementById('clearSelBtn').onclick=()=>{selection.clear();save();renderPlanner();};
+document.getElementById('moveBtn').onclick=()=>{
+  const others=state.projects.filter(p=>p.id!==state.current);
+  if(!others.length){alert('Create another project first.');return;}
+  const sel=document.getElementById('moveTarget');sel.innerHTML='';
+  others.forEach(p=>{const o=document.createElement('option');o.value=p.id;o.textContent=p.name;sel.appendChild(o);});
+  document.getElementById('moveDesc').textContent=`${selection.size} selected cell(s) will leave "${curProj().name}" and move to the chosen project. Location (site/factory) is preserved. Cells already taken on the target are skipped.`;
+  document.getElementById('moveModal').classList.add('show');
+};
+document.getElementById('moveCancel').onclick=()=>document.getElementById('moveModal').classList.remove('show');
+document.getElementById('moveConfirm').onclick=()=>{
+  const target=document.getElementById('moveTarget').value;let moved=0;
+  [...selection].forEach(key=>{const b=state.bookings[key];
+    if(b){b.proj=target;moved++;
+      const [date,resId,band]=key.split('|');
+      supa.from('bookings').update({project_id:target}).eq('date',date).eq('resource_id',resId).eq('band',band).then(({error})=>{if(error)sbFail(error);});
+    }});
+  selection.clear();document.getElementById('moveModal').classList.remove('show');
+  save();renderPlanner();renderPnl();
+};
+
+/* PNL selectors */
+function renderPnlSelectors(){
+  const sel=document.getElementById('pnlProj');sel.innerHTML='';
+  state.projects.forEach(p=>{const o=document.createElement('option');o.value=p.id;o.textContent=p.name;sel.appendChild(o);});
+  sel.value=state.current;
+  document.getElementById('pnlName').value=curProj().name;
+  document.getElementById('revInput').value=curProj().revenue||'';
+}
+document.getElementById('pnlProj').onchange=e=>{state.current=e.target.value;selection.clear();save();renderPnl();renderLegend();};
+const updProjName=debounce((id,name)=>{supa.from('projects').update({name}).eq('id',id).then(({error})=>{if(error)sbFail(error);});},400);
+document.getElementById('pnlName').oninput=e=>{curProj().name=e.target.value;save();renderLegend();const s=document.getElementById('pnlProj');s.options[s.selectedIndex].textContent=e.target.value;updProjName(curProj().id,curProj().name);};
+document.getElementById('delProj').onclick=()=>{
+  if(state.projects.length<=1){alert('Keep at least one project.');return;}
+  if(!confirm(`Delete "${curProj().name}"? Its bookings will be freed.`))return;
+  const id=state.current;for(const k in state.bookings)if(state.bookings[k].proj===id)delete state.bookings[k];
+  state.projects=state.projects.filter(p=>p.id!==id);state.current=state.projects[0].id;save();renderPnl();renderPlanner();
+  supa.from('projects').delete().eq('id',id).then(({error})=>{if(error)sbFail(error);});
+};
+const updProjRevenue=debounce((id,revenue)=>{supa.from('projects').update({revenue}).eq('id',id).then(({error})=>{if(error)sbFail(error);});},400);
+document.getElementById('revInput').oninput=e=>{curProj().revenue=Number(e.target.value)||0;save();renderPnlSummary();updProjRevenue(curProj().id,curProj().revenue);};
+
+/* DAY LABOUR (all months) */
+function renderDayLabour(){
+  const proj=curProj(),wrap=document.getElementById('dayLabour');
+  const rows=state.roster.filter(p=>!isSqft(p)).map(p=>{
+    const prim=countBand(p.id,proj.id,'P'),oth=sumOtHours(p.id,proj.id);
+    return {p,prim,oth};
+  }).filter(x=>x.prim||x.oth);
+  if(!rows.length){wrap.innerHTML='<div class="empty">No day-rate resources booked. Book days on the planner.</div>';return;}
+  let html='<table class="rtable"><thead><tr><th>Name</th><th style="text-align:right">Rate/day</th><th style="text-align:right">Primary days</th><th style="text-align:right">Site/Fac</th><th style="text-align:right">OT hrs</th><th style="text-align:right">Primary ₹</th><th style="text-align:right">OT ₹</th><th style="text-align:right">Total</th></tr></thead><tbody>';
+  let tP=0,tO=0;
+  rows.forEach(({p,prim,oth})=>{
+    const pc=prim*p.rate, oc=oth*p.rate*OT_HR_FRAC;tP+=pc;tO+=oc;
+    const site=countBandLoc(p.id,proj.id,'P','site'),fac=countBandLoc(p.id,proj.id,'P','factory');
+    html+=`<tr><td>${p.name}<div class="muted" style="font-size:11px">${p.trade}</div></td>
+      <td style="text-align:right">${CUR.format(p.rate)}</td>
+      <td style="text-align:right">${prim}</td>
+      <td style="text-align:right;font-size:12px">${site}/${fac}</td>
+      <td style="text-align:right">${oth||''}</td>
+      <td style="text-align:right">${CUR.format(pc)}</td>
+      <td style="text-align:right">${CUR.format(oc)}</td>
+      <td style="text-align:right;font-weight:560">${CUR.format(pc+oc)}</td></tr>`;
+  });
+  html+=`<tr><td colspan="5" style="text-align:right;font-weight:700;border-top:2px solid var(--ink)">Day labour total</td>
+    <td style="text-align:right;font-weight:700;border-top:2px solid var(--ink)">${CUR.format(tP)}</td>
+    <td style="text-align:right;font-weight:700;border-top:2px solid var(--ink)">${CUR.format(tO)}</td>
+    <td style="text-align:right;font-weight:700;border-top:2px solid var(--ink)">${CUR.format(tP+tO)}</td></tr></tbody></table>`;
+  wrap.innerHTML=html;
+}
+
+/* SQFT LABOUR */
+function renderSqftLabour(){
+  const proj=curProj(),wrap=document.getElementById('sqftLabour');
+  const people=state.roster.filter(p=>isSqft(p)&&(countBand(p.id,proj.id,'P')||sumOtHours(p.id,proj.id)));
+  if(!people.length){wrap.innerHTML='<div class="empty">No sqft resources booked to this project. Book their days on the planner to enable area entry.</div>';return;}
+  if(!proj.areas)proj.areas={};let html='';
+  people.forEach(p=>{
+    if(!proj.areas[p.id]){
+      const row={id:crypto.randomUUID(),area:'',sqft:0};
+      proj.areas[p.id]=[row];
+      supa.from('areas').insert({id:row.id,project_id:proj.id,resource_id:p.id,area_name:'',sqft:0}).then(({error})=>{if(error)sbFail(error);});
+    }
+    const list=proj.areas[p.id];let sub=0;
+    const rows=list.map((a,i)=>{const c=(Number(a.sqft)||0)*p.rate;sub+=c;
+      return `<div class="area-row" data-res="${p.id}" data-i="${i}">
+        <input type="text" class="a-name" placeholder="Area (e.g. Kitchen)" value="${(a.area||'').replace(/"/g,'&quot;')}">
+        <input type="number" class="a-sqft" placeholder="sqft" min="0" value="${a.sqft||''}">
+        <div class="area-cost">${CUR.format(c)}<div class="ai">${p.rate}/sqft</div></div>
+        <button class="del-x">×</button></div>`;}).join('');
+    const days=countBand(p.id,proj.id,'P'),oth=sumOtHours(p.id,proj.id);
+    html+=`<div class="area-block"><h3>${p.name}</h3><div class="who">${p.trade} · ${CUR.format(p.rate)}/sqft · ${days} day(s)${oth?' + '+oth+'h OT':''} booked</div>
+      ${rows}<button class="btn sm add-area" data-res="${p.id}">+ Add area</button>
+      <span style="float:right;font-weight:600">Subtotal ${CUR.format(sub)}</span></div>`;
+  });
+  wrap.innerHTML=html;
+  const updArea=debounce((id,patch)=>{supa.from('areas').update(patch).eq('id',id).then(({error})=>{if(error)sbFail(error);});},400);
+  wrap.querySelectorAll('.a-name').forEach(inp=>inp.oninput=()=>{const r=inp.closest('.area-row');const a=proj.areas[r.dataset.res][r.dataset.i];a.area=inp.value;save();updArea(a.id,{area_name:a.area});});
+  wrap.querySelectorAll('.a-sqft').forEach(inp=>inp.oninput=()=>{const r=inp.closest('.area-row');const a=proj.areas[r.dataset.res][r.dataset.i];a.sqft=Number(inp.value)||0;save();renderSqftLabour();renderPnlSummary();updArea(a.id,{sqft:a.sqft});});
+  wrap.querySelectorAll('.del-x').forEach(b=>b.onclick=()=>{const r=b.closest('.area-row');const list=proj.areas[r.dataset.res];const removed=list.splice(r.dataset.i,1)[0];
+    supa.from('areas').delete().eq('id',removed.id).then(({error})=>{if(error)sbFail(error);});
+    if(!list.length){const row={id:crypto.randomUUID(),area:'',sqft:0};list.push(row);
+      supa.from('areas').insert({id:row.id,project_id:proj.id,resource_id:r.dataset.res,area_name:'',sqft:0}).then(({error})=>{if(error)sbFail(error);});
+    }
+    save();renderSqftLabour();renderPnlSummary();});
+  wrap.querySelectorAll('.add-area').forEach(b=>b.onclick=()=>{const row={id:crypto.randomUUID(),area:'',sqft:0};proj.areas[b.dataset.res].push(row);
+    supa.from('areas').insert({id:row.id,project_id:proj.id,resource_id:b.dataset.res,area_name:'',sqft:0}).then(({error})=>{if(error)sbFail(error);});
+    save();renderSqftLabour();});
+}
+
+/* MATERIALS */
+function renderMaterials(){
+  const proj=curProj(),wrap=document.getElementById('matRows');wrap.innerHTML='';
+  (proj.materials||[]).forEach((m,i)=>{
+    const row=document.createElement('div');row.className='mat-row';
+    row.innerHTML=`<input type="text" placeholder="e.g. Plywood, laminate" value="${(m.item||'').replace(/"/g,'&quot;')}"><input type="number" placeholder="0" min="0" value="${m.cost||''}"><button class="del-x">×</button>`;
+    const[it,co]=row.querySelectorAll('input');
+    const updMat=debounce(patch=>{supa.from('materials').update(patch).eq('id',m.id).then(({error})=>{if(error)sbFail(error);});},400);
+    it.oninput=()=>{m.item=it.value;save();updMat({item:m.item});};
+    co.oninput=()=>{m.cost=Number(co.value)||0;save();renderPnlSummary();updMat({cost:m.cost});};
+    row.querySelector('.del-x').onclick=()=>{proj.materials.splice(i,1);save();renderMaterials();renderPnlSummary();
+      supa.from('materials').delete().eq('id',m.id).then(({error})=>{if(error)sbFail(error);});};
+    wrap.appendChild(row);
+  });
+}
+document.getElementById('addMat').onclick=()=>{
+  const m={id:crypto.randomUUID(),item:'',cost:0};
+  curProj().materials.push(m);save();renderMaterials();
+  supa.from('materials').insert({id:m.id,project_id:curProj().id,item:'',cost:0}).then(({error})=>{if(error)sbFail(error);});
+};
+
+/* STATS (all months) */
+function projStats(proj){
+  let prim=0,ot=0;
+  state.roster.filter(p=>!isSqft(p)).forEach(p=>{prim+=countBand(p.id,proj.id,'P')*p.rate;ot+=sumOtHours(p.id,proj.id)*p.rate*OT_HR_FRAC;});
+  let sq=0;state.roster.filter(p=>isSqft(p)).forEach(p=>{const a=(proj.areas||{})[p.id]||[];a.forEach(x=>sq+=(Number(x.sqft)||0)*p.rate);});
+  const mat=(proj.materials||[]).reduce((s,m)=>s+(Number(m.cost)||0),0);
+  const rev=Number(proj.revenue)||0,cost=prim+ot+sq+mat,profit=rev-cost,margin=rev>0?profit/rev*100:0;
+  return {prim,ot,sq,mat,cost,rev,profit,margin};
+}
+function renderPnlSummary(){
+  const s=projStats(curProj());
+  document.getElementById('pnlSub').textContent=`${curProj().name} · all-months total`;
+  document.getElementById('pnlSummary').innerHTML=`
+    <div class="cell2"><div class="k">Primary labour</div><div class="v">${CUR.format(s.prim)}</div></div>
+    <div class="cell2"><div class="k">OT labour</div><div class="v">${CUR.format(s.ot)}</div></div>
+    <div class="cell2"><div class="k">Sqft labour</div><div class="v">${CUR.format(s.sq)}</div></div>
+    <div class="cell2"><div class="k">Material</div><div class="v">${CUR.format(s.mat)}</div></div>
+    <div class="cell2"><div class="k">Total cost</div><div class="v">${CUR.format(s.cost)}</div></div>
+    <div class="cell2"><div class="k">Revenue</div><div class="v">${CUR.format(s.rev)}</div></div>
+    <div class="cell2"><div class="k">Profit</div><div class="v ${s.profit>=0?'pos':'neg'}">${CUR.format(s.profit)}</div></div>
+    <div class="cell2"><div class="k">Margin</div><div class="v ${s.profit>=0?'pos':'neg'}">${s.rev>0?NUM.format(s.margin)+'%':'—'}</div></div>`;
+}
+function renderPnl(){renderPnlSelectors();renderDayLabour();renderSqftLabour();renderMaterials();renderPnlSummary();}
+
+function monthLabel(mo){return mo?new Date(mo+'-01').toLocaleDateString('en-US',{month:'long',year:'numeric'}):'—';}
+
+/* DASHBOARD */
+function renderDash(){
+  const body=document.getElementById('dashBody');body.innerHTML='';
+  document.getElementById('dashSub').textContent=`${state.projects.length} project(s) · costs aggregated across all months`;
+  let tP=0,tO=0,tS=0,tM=0,tR=0;
+  state.projects.forEach(proj=>{const s=projStats(proj);tP+=s.prim;tO+=s.ot;tS+=s.sq;tM+=s.mat;tR+=s.rev;
+    const tr=document.createElement('tr');
+    tr.innerHTML=`<td><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:${proj.color};margin-right:7px"></span>${proj.name}</td>
+      <td>${CUR.format(s.prim)}</td><td>${CUR.format(s.ot)}</td><td>${CUR.format(s.sq)}</td><td>${CUR.format(s.mat)}</td>
+      <td>${CUR.format(s.cost)}</td><td>${CUR.format(s.rev)}</td><td>${CUR.format(s.profit)}</td>
+      <td><span class="pill ${s.profit>=0?'pos':'neg'}">${s.rev>0?NUM.format(s.margin)+'%':'—'}</span></td>`;
+    body.appendChild(tr);});
+  const cost=tP+tO+tS+tM,profit=tR-cost,margin=tR>0?profit/tR*100:0;
+  const tr=document.createElement('tr');tr.className='total';
+  tr.innerHTML=`<td>Portfolio total</td><td>${CUR.format(tP)}</td><td>${CUR.format(tO)}</td><td>${CUR.format(tS)}</td><td>${CUR.format(tM)}</td>
+    <td>${CUR.format(cost)}</td><td>${CUR.format(tR)}</td><td>${CUR.format(profit)}</td>
+    <td><span class="pill ${profit>=0?'pos':'neg'}">${tR>0?NUM.format(margin)+'%':'—'}</span></td>`;
+  body.appendChild(tr);
+  document.getElementById('portSummary').innerHTML=`
+    <div class="cell2"><div class="k">Projects</div><div class="v">${state.projects.length}</div></div>
+    <div class="cell2"><div class="k">Revenue</div><div class="v">${CUR.format(tR)}</div></div>
+    <div class="cell2"><div class="k">Total cost</div><div class="v">${CUR.format(cost)}</div></div>
+    <div class="cell2"><div class="k">Profit</div><div class="v ${profit>=0?'pos':'neg'}">${CUR.format(profit)}</div></div>
+    <div class="cell2"><div class="k">Blended margin</div><div class="v ${profit>=0?'pos':'neg'}">${tR>0?NUM.format(margin)+'%':'—'}</div></div>`;
+}
+
+/* BENCH (selected month) */
+let wdMode='mon-sat';
+document.getElementById('wdSeg').querySelectorAll('button').forEach(b=>b.onclick=()=>{wdMode=b.dataset.wd;document.querySelectorAll('#wdSeg button').forEach(x=>x.classList.toggle('on',x===b));renderBench();});
+function isWorkingDay(dow){if(wdMode==='all')return true;if(wdMode==='mon-fri')return dow>=1&&dow<=5;return dow>=1&&dow<=6;}
+function renderBench(){
+  const mo=state.month,days=daysOfMonth(mo).filter(d=>isWorkingDay(d.dow));
+  const wdCount=days.length;
+  document.getElementById('benchSub').textContent=`${monthLabel(mo)} · ${wdCount} working day(s)`;
+  const body=document.getElementById('benchBody');body.innerHTML='';
+  let totBench=0,totBooked=0,fullyIdle=0;
+  const rows=state.roster.map(p=>{
+    let booked=0,ot=0;
+    days.forEach(d=>{if(state.bookings[bkey(d.date,p.id,'P')])booked++;ot+=otHoursDay(d.date,p.id);});
+    const bench=wdCount-booked;totBench+=bench;totBooked+=booked;if(booked===0)fullyIdle++;
+    return {p,booked,bench,ot,util:wdCount?booked/wdCount*100:0};
+  });
+  rows.sort((a,b)=>a.util-b.util);
+  rows.forEach(({p,booked,bench,ot,util})=>{
+    const col=util>=75?'var(--accent)':util>=40?'#8a6d1f':'var(--warn)';
+    const tr=document.createElement('tr');
+    tr.innerHTML=`<td>${p.name}</td><td class="muted">${p.trade}</td><td>${booked}</td>
+      <td style="font-weight:${bench===wdCount?'700':'400'};color:${bench===wdCount?'var(--warn)':'inherit'}">${bench}</td>
+      <td>${ot?ot+'h':''}</td>
+      <td><div class="row" style="justify-content:flex-end;gap:8px"><span>${NUM.format(util)}%</span>
+        <div class="util-bar"><i style="width:${Math.min(100,util)}%;background:${col}"></i></div></div></td>`;
+    body.appendChild(tr);
+  });
+  const cap=state.roster.length*wdCount;
+  const blended=cap?totBooked/cap*100:0;
+  document.getElementById('benchSummary').innerHTML=`
+    <div class="cell2"><div class="k">Resources</div><div class="v">${state.roster.length}</div></div>
+    <div class="cell2"><div class="k">Capacity (mandays)</div><div class="v">${cap}</div></div>
+    <div class="cell2"><div class="k">Booked mandays</div><div class="v">${totBooked}</div></div>
+    <div class="cell2"><div class="k">Bench mandays</div><div class="v ${totBench>0?'neg':'pos'}">${totBench}</div></div>
+    <div class="cell2"><div class="k">Fully idle people</div><div class="v ${fullyIdle>0?'neg':'pos'}">${fullyIdle}</div></div>
+    <div class="cell2"><div class="k">Utilisation</div><div class="v ${blended>=60?'pos':'neg'}">${NUM.format(blended)}%</div></div>`;
+}
+
+/* ROSTER */
+function renderRoster(){
+  const body=document.getElementById('rosterBody');body.innerHTML='';
+  state.roster.forEach(p=>{
+    const tr=document.createElement('tr');
+    tr.innerHTML=`<td><input type="text" value="${(p.name||'').replace(/"/g,'&quot;')}" data-f="name"></td>
+      <td><input type="text" value="${(p.trade||'').replace(/"/g,'&quot;')}" data-f="trade"></td>
+      <td class="narrow"><select data-f="unit"><option value="day"${p.unit==='day'?' selected':''}>Per day</option><option value="sqft"${p.unit==='sqft'?' selected':''}>Per sqft</option></select></td>
+      <td class="narrow"><input type="number" value="${p.rate}" data-f="rate" min="0"></td>
+      <td><button class="del-x">×</button></td>`;
+    const updRes=debounce(patch=>{supa.from('resources').update(patch).eq('id',p.id).then(({error})=>{if(error)sbFail(error);});},400);
+    tr.querySelectorAll('[data-f]').forEach(inp=>inp.oninput=()=>{const f=inp.dataset.f;p[f]=f==='rate'?(Number(inp.value)||0):inp.value;save();updRes({[f]:p[f]});});
+    tr.querySelector('.del-x').onclick=()=>{if(!confirm(`Remove ${p.name}? Their bookings will be cleared.`))return;
+      for(const k in state.bookings)if(k.split('|')[1]===p.id)delete state.bookings[k];
+      state.projects.forEach(pr=>{if(pr.areas)delete pr.areas[p.id];});
+      state.roster=state.roster.filter(x=>x.id!==p.id);save();renderRoster();
+      supa.from('resources').delete().eq('id',p.id).then(({error})=>{if(error)sbFail(error);});};
+    body.appendChild(tr);
+  });
+}
+document.getElementById('addPerson').onclick=()=>{
+  const name=document.getElementById('newName').value.trim();
+  const trade=document.getElementById('newTrade').value.trim();
+  const unit=document.getElementById('newUnit').value;const rate=Number(document.getElementById('newRate').value)||0;
+  if(!name){alert('Enter a name.');return;}
+  const p={id:'r'+Date.now().toString(36)+Math.random().toString(36).slice(2,5),name,trade,unit,rate};
+  state.roster.push(p);
+  ['newName','newTrade','newRate'].forEach(id=>document.getElementById(id).value='');save();renderRoster();
+  supa.from('resources').insert(p).then(({error})=>{if(error)sbFail(error);});
+};
+document.getElementById('resetBtn').onclick=async()=>{
+  if(!confirm('Reset roster to original Manpower list? Custom people and their bookings are removed.'))return;
+  const ids=new Set(SEED.map(p=>p.id));
+  for(const k in state.bookings){if(!ids.has(k.split('|')[1]))delete state.bookings[k];}
+  const toRemove=state.roster.filter(p=>!ids.has(p.id)).map(p=>p.id);
+  state.roster=JSON.parse(JSON.stringify(SEED));save();renderRoster();renderPlanner();
+  if(toRemove.length){const {error:delErr}=await supa.from('resources').delete().in('id',toRemove);if(delErr)sbFail(delErr);}
+  const {error:upErr}=await supa.from('resources').upsert(SEED);
+  if(upErr)sbFail(upErr);
+};
+
+/* EXPORT/IMPORT */
+document.getElementById('exportBtn').onclick=()=>{
+  const blob=new Blob([JSON.stringify(state,null,2)],{type:'application/json'});
+  const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='resource_planner.json';a.click();
+};
+document.getElementById('importBtn').onclick=()=>document.getElementById('importFile').click();
+document.getElementById('importFile').onchange=e=>{
+  const f=e.target.files[0];if(!f)return;const r=new FileReader();
+  r.onload=async()=>{
+    let s;try{s=JSON.parse(r.result);}catch(err){alert('Invalid file.');return;}
+    if(!s.projects||!s.roster){alert('Invalid file.');return;}
+    if(!confirm('This will REPLACE all data in the shared database with the contents of this file. Continue?'))return;
+    try{
+      await bulkReplaceState(s);
+      state=await loadState();
+      save();initAll();
+    }catch(err){alert('Import failed: '+err.message);}
+  };
+  r.readAsText(f);
+};
+
+/* ===== DAILY ALLOCATION (WhatsApp) ===== */
+// map each roster trade to a WhatsApp group + a nice plural label for the header
+const TRADE_GROUPS=[
+  {label:'Carpenters',   match:t=>/carpenter/i.test(t)},
+  {label:'Electricians', match:t=>/electric|plumb/i.test(t)},
+  {label:'Painters',     match:t=>/paint/i.test(t)},
+  {label:'Polishers',    match:t=>/polish/i.test(t)},
+  {label:'Assemblers',   match:t=>/assembler/i.test(t)},
+  {label:'Gypsum',       match:t=>/gypsum/i.test(t)},
+  {label:'Helpers',      match:t=>/helper/i.test(t)},
+  {label:'QC',           match:t=>/^qc$/i.test(t)},
+  {label:'Management',   match:t=>/management/i.test(t)},
+];
+function groupFor(trade){const g=TRADE_GROUPS.find(g=>g.match(trade));return g?g.label:'Other';}
+
+const dailyDateEl=document.getElementById('dailyDate');
+dailyDateEl.value=todayStr;
+dailyDateEl.onchange=renderDaily;
+document.getElementById('dailyPrev').onclick=()=>{dailyDateEl.value=shiftDate(dailyDateEl.value,-1);renderDaily();};
+document.getElementById('dailyNext').onclick=()=>{dailyDateEl.value=shiftDate(dailyDateEl.value,1);renderDaily();};
+function shiftDate(ds,delta){const d=new Date(ds+'T00:00:00');d.setDate(d.getDate()+delta);return d.toISOString().slice(0,10);}
+function projName(id){const p=state.projects.find(x=>x.id===id);return p?p.name:'?';}
+
+// returns [{group, count, text}] one entry per WhatsApp group that has people that day
+function buildDailyBlocks(){
+  const ds=dailyDateEl.value;if(!ds)return[];
+  const d=new Date(ds+'T00:00:00');
+  const dateNice=d.toLocaleDateString('en-GB',{weekday:'long',day:'numeric',month:'short',year:'numeric'});
+  // group -> trade -> [lines]
+  const groups={};
+  state.roster.forEach(p=>{
+    const pb=state.bookings[bkey(ds,p.id,'P')];
+    const ob=state.bookings[bkey(ds,p.id,'O')];
+    if(!pb&&!ob)return;
+    const g=groupFor(p.trade);
+    if(!groups[g])groups[g]={};
+    if(!groups[g][p.trade])groups[g][p.trade]=[];
+    let parts=[];
+    if(pb)parts.push(projName(pb.proj)+(pb.loc==='factory'?' (Factory)':''));
+    if(ob&&ob.hrs)parts.push(`OT ${ob.hrs}h: `+projName(ob.proj)+(ob.loc==='factory'?' (Factory)':''));
+    groups[g][p.trade].push(`• ${p.name} — ${parts.join(' | ')}`);
+  });
+  // preserve a sensible group order
+  const order=TRADE_GROUPS.map(g=>g.label).concat(['Other']);
+  const out=[];
+  order.forEach(gname=>{
+    const trades=groups[gname];if(!trades)return;
+    let count=0;
+    let body='';
+    Object.keys(trades).sort().forEach(tr=>{
+      body+=`\n*${tr}*\n`+trades[tr].join('\n')+'\n';
+      count+=trades[tr].length;
+    });
+    const text=`*Resource Allocation for ${gname}*  ${dateNice}\n${body}`.trimEnd();
+    out.push({group:gname,count,text});
+  });
+  return out;
+}
+
+function renderDaily(){
+  const wrap=document.getElementById('dailyBlocks');wrap.innerHTML='';
+  const blocks=buildDailyBlocks();
+  if(!blocks.length){wrap.innerHTML='<div class="empty">No resources allocated for this day.</div>';return;}
+  blocks.forEach((b,i)=>{
+    const div=document.createElement('div');div.className='dblock';
+    div.innerHTML=`<div class="dblock-head">
+        <span class="gname">${b.group}</span>
+        <span class="gcount">${b.count} allocated</span>
+        <span class="copied-mini" data-dot="${i}">Copied ✓</span>
+        <button class="btn sm" data-copy="${i}" style="margin-left:auto">Copy this block</button>
+      </div><pre data-pre="${i}"></pre>`;
+    div.querySelector('[data-pre="'+i+'"]').textContent=b.text;
+    wrap.appendChild(div);
+  });
+  wrap.querySelectorAll('[data-copy]').forEach(btn=>btn.onclick=()=>{
+    const i=btn.dataset.copy;const txt=wrap.querySelector('[data-pre="'+i+'"]').textContent;
+    copyText(txt);const dot=wrap.querySelector('[data-dot="'+i+'"]');dot.classList.add('show');setTimeout(()=>dot.classList.remove('show'),1200);
+  });
+}
+function copyText(txt){
+  try{navigator.clipboard.writeText(txt);}
+  catch(e){const ta=document.createElement('textarea');ta.value=txt;document.body.appendChild(ta);ta.select();document.execCommand('copy');ta.remove();}
+}
+document.getElementById('copyAll').onclick=()=>{
+  const blocks=buildDailyBlocks();if(!blocks.length)return;
+  copyText(blocks.map(b=>b.text).join('\n\n———\n\n'));
+  const dot=document.getElementById('copyDot');dot.classList.add('show');setTimeout(()=>dot.classList.remove('show'),1200);
+};
+
+/* ===== EXCEL EXPORT ===== */
+function r0(n){return Math.round(Number(n)||0);}
+document.getElementById('exportXlsx').onclick=()=>{
+  if(typeof XLSX==='undefined'){alert('Excel library still loading — try again in a moment.');return;}
+  const wb=XLSX.utils.book_new();
+
+  const pnlRows=[['Project','Primary labour','OT labour','Sqft labour','Material','Total cost','Revenue','Profit','Margin %']];
+  let tP=0,tO=0,tS=0,tM=0,tR=0;
+  state.projects.forEach(pr=>{const s=projStats(pr);tP+=s.prim;tO+=s.ot;tS+=s.sq;tM+=s.mat;tR+=s.rev;
+    pnlRows.push([pr.name,r0(s.prim),r0(s.ot),r0(s.sq),r0(s.mat),r0(s.cost),r0(s.rev),r0(s.profit),s.rev>0?+s.margin.toFixed(1):'']);});
+  const cost=tP+tO+tS+tM,profit=tR-cost;
+  pnlRows.push(['PORTFOLIO TOTAL',r0(tP),r0(tO),r0(tS),r0(tM),r0(cost),r0(tR),r0(profit),tR>0?+(profit/tR*100).toFixed(1):'']);
+  XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(pnlRows),'Project P&L');
+
+  const labRows=[['Project','Name','Trade','Billing','Rate','Primary days','OT hrs','Site days','Factory days','Sqft','Primary','OT','Sqft cost','Total']];
+  state.projects.forEach(pr=>{
+    state.roster.forEach(p=>{
+      const prim=countBand(p.id,pr.id,'P'),oth=sumOtHours(p.id,pr.id);
+      const sqftArea=((pr.areas||{})[p.id]||[]).reduce((s,a)=>s+(Number(a.sqft)||0),0);
+      if(!prim&&!oth&&!sqftArea)return;
+      const site=countBandLoc(p.id,pr.id,'P','site'),fac=countBandLoc(p.id,pr.id,'P','factory');
+      let pc=0,oc=0,sc=0;
+      if(isSqft(p)){sc=sqftArea*p.rate;}else{pc=prim*p.rate;oc=oth*p.rate*OT_HR_FRAC;}
+      labRows.push([pr.name,p.name,p.trade,p.unit,p.rate,prim,oth,site,fac,isSqft(p)?sqftArea:'',r0(pc),r0(oc),r0(sc),r0(pc+oc+sc)]);
+    });
+  });
+  XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(labRows),'Labour detail');
+
+  const matRows=[['Project','Item','Cost']];
+  state.projects.forEach(pr=>{(pr.materials||[]).forEach(m=>{if(m.item||m.cost)matRows.push([pr.name,m.item||'',Number(m.cost)||0]);});});
+  XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(matRows),'Materials');
+
+  const mo=state.month,bdays=daysOfMonth(mo).filter(d=>isWorkingDay(d.dow));const wd=bdays.length;
+  const benchRows=[[`Bench — ${monthLabel(mo)} (${wd} working days, ${wdMode})`],[],['Name','Trade','Booked days','Bench days','OT hrs','Utilisation %']];
+  state.roster.forEach(p=>{let bk=0,ot=0;bdays.forEach(d=>{if(state.bookings[bkey(d.date,p.id,'P')])bk++;ot+=otHoursDay(d.date,p.id);});
+    benchRows.push([p.name,p.trade,bk,wd-bk,ot,wd?+(bk/wd*100).toFixed(1):0]);});
+  XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(benchRows),'Bench '+mo);
+
+  const bkRows=[['Date','Resource','Trade','Band','OT hrs','Project','Location']];
+  Object.keys(state.bookings).sort().forEach(k=>{const[date,resId,band]=k.split('|');const p=state.roster.find(x=>x.id===resId);const b=state.bookings[k];
+    bkRows.push([date,p?p.name:resId,p?p.trade:'',band==='P'?'Primary':'OT',band==='O'?(b.hrs||0):'',projName(b.proj),b.loc]);});
+  XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(bkRows),'Bookings');
+
+  XLSX.writeFile(wb,'Resource_Planner_'+mo+'.xlsx');
+};
+
+function initAll(){monthEl.value=state.month;renderPlanner();renderPnl();renderDash();renderBench();renderDaily();renderRoster();}
+
+(async function boot(){
+  const wrap=document.getElementById('wrap');
+  try{
+    state=await loadState();
+  }catch(e){
+    wrap.style.opacity='1';wrap.style.pointerEvents='';
+    wrap.innerHTML='<div class="loaderr">Could not load data from Supabase.<br>'+(e&&e.message?e.message:e)+'<br><br>Check your connection and reload.</div>';
+    return;
+  }
+  initAll();
+  wrap.style.opacity='';wrap.style.pointerEvents='';
+})();
+</script>
+</body>
+</html>
