@@ -24,3 +24,6 @@ next-env.d.ts
 
 # local-only Claude Code settings
 .claude/settings.local.json
+
+# sensitive source documents (salary/PF breakdowns etc.) - never committed to this public repo
+Related Docs/

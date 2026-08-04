@@ -59,29 +59,52 @@ export default function Roster({
         const wb = XLSX.read(buf, { type: "array" });
         const sheet = wb.Sheets[wb.SheetNames[0]];
         const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: "" });
-        const get = (row: Record<string, unknown>, keys: string[]) => {
+
+        // header matching is tolerant of the Manpower.xlsx format: padded headers like
+        // " Employee Name " / " Trade " / " Total cost/day ", plus a trailing unlabeled
+        // column holding "per day" / "per SQFT" for billing unit.
+        const norm = (s: string) => s.trim().toLowerCase().replace(/\s+/g, " ");
+        const get = (row: Record<string, unknown>, aliases: string[]) => {
           for (const k of Object.keys(row)) {
-            if (keys.includes(k.trim().toLowerCase())) return row[k];
+            const nk = norm(k);
+            if (aliases.some((a) => nk === a || nk.includes(a))) return row[k];
           }
           return undefined;
         };
+        const detectUnitFromAnyColumn = (row: Record<string, unknown>): Unit | undefined => {
+          for (const k of Object.keys(row)) {
+            const v = norm(String(row[k] ?? ""));
+            if (v.includes("sqft")) return "sqft";
+            if (v.includes("per day")) return "day";
+          }
+          return undefined;
+        };
+
         const parsed: Omit<Resource, "id">[] = rows
           .map((row) => {
-            const name = String(get(row, ["name", "full name"]) ?? "").trim();
+            const name = String(get(row, ["employee name", "full name", "name"]) ?? "").trim();
             const trade = String(get(row, ["trade"]) ?? "").trim();
-            const unitRaw = String(get(row, ["billing", "unit"]) ?? "day").trim().toLowerCase();
-            const unit: Unit = unitRaw.includes("sqft") ? "sqft" : "day";
-            const rate = Number(get(row, ["rate"])) || 0;
+            const unitRaw = String(get(row, ["billing", "unit"]) ?? "").trim().toLowerCase();
+            const unit: Unit = unitRaw.includes("sqft")
+              ? "sqft"
+              : unitRaw.includes("day")
+                ? "day"
+                : detectUnitFromAnyColumn(row) || "day";
+            const rateRaw = get(row, ["total cost/day", "total cost per day", "rate"]);
+            const rate = Number(rateRaw) || 0;
             return { name, trade, unit, rate };
           })
-          .filter((r) => r.name);
+          .filter((r) => r.name && r.rate > 0);
+
         if (!parsed.length) {
-          alert("No valid rows found. Expected columns: Name, Trade, Billing, Rate.");
+          alert(
+            "No valid rows found. Expected columns like Employee Name, Trade, Total cost/day (rate), and a billing unit of per day / per SQFT. Rows missing a name or rate are skipped.",
+          );
           return;
         }
         onUploadExcel(parsed);
       } catch {
-        alert("Could not read that Excel file. Expected columns: Name, Trade, Billing, Rate.");
+        alert("Could not read that Excel file.");
       }
     };
     reader.readAsArrayBuffer(f);
@@ -299,7 +322,7 @@ export default function Roster({
         </button>
         <input ref={excelInput} type="file" accept=".xlsx,.xls" hidden onChange={handleExcelUpload} />
         <span className="muted" style={{ fontSize: 12 }}>
-          Columns expected: Name, Trade, Billing (day/sqft), Rate. Adds to the existing roster.
+          Same format as Manpower.xlsx: Employee Name, Trade, Total cost/day (rate), and per day / per SQFT billing. Adds to the existing roster; rows without a name or rate are skipped.
         </span>
       </div>
       <div className="row" style={{ marginTop: 18 }}>
