@@ -1,9 +1,11 @@
 "use client";
 
-import { Fragment, useRef, useState } from "react";
+import { Fragment, useMemo, useRef, useState } from "react";
 import type { AppState, Band, Loc } from "@/lib/types";
 import { bkey } from "@/lib/types";
-import { daysOfMonth, hasPrimaryDay, isSqft } from "@/lib/calc";
+import { TRADE_GROUPS, daysOfMonth, groupFor, hasPrimaryDay, isSqft } from "@/lib/calc";
+
+const ALL_TRADES = "All";
 
 const todayStr = new Date().toISOString().slice(0, 10);
 
@@ -48,7 +50,15 @@ export default function Planner({
   const dragMode = useRef<"add" | "remove">("add");
   const [showMove, setShowMove] = useState(false);
   const [moveTarget, setMoveTarget] = useState("");
+  const [tradeFilter, setTradeFilter] = useState(ALL_TRADES);
   const curProj = projects.find((p) => p.id === current);
+
+  const tradeOrder = [...TRADE_GROUPS.map((g) => g.label), "Other"];
+  const tradesPresent = useMemo(() => {
+    const present = new Set(roster.map((p) => groupFor(p.trade)));
+    return tradeOrder.filter((g) => present.has(g));
+  }, [roster]);
+  const visibleRoster = tradeFilter === ALL_TRADES ? roster : roster.filter((p) => groupFor(p.trade) === tradeFilter);
 
   function projColor(id: string) {
     return projects.find((p) => p.id === id)?.color || "#999";
@@ -163,6 +173,19 @@ export default function Planner({
           </>
         )}
       </div>
+      <div className="legend" style={{ marginBottom: 12 }}>
+        <span className="fldlabel" style={{ margin: 0 }}>
+          Filter by trade
+        </span>
+        <button className={"legchip" + (tradeFilter === ALL_TRADES ? " active" : "")} onClick={() => setTradeFilter(ALL_TRADES)}>
+          All
+        </button>
+        {tradesPresent.map((g) => (
+          <button key={g} className={"legchip" + (tradeFilter === g ? " active" : "")} onClick={() => setTradeFilter(g)}>
+            {g}
+          </button>
+        ))}
+      </div>
       <div className="hint">
         Each resource has a <b>Primary</b> row (10am–6pm, 8h) and an <b>OT</b> row (from 6pm, 1-hour blocks). Pick the
         active project (legend) and Site/Factory, then <b>click-drag</b> the primary row to book; click a booked day
@@ -187,7 +210,7 @@ export default function Planner({
             </tr>
           </thead>
           <tbody>
-            {roster.map((p) => {
+            {visibleRoster.map((p) => {
               let mine = 0;
               let rowh = 0;
               const primaryCells = days.map((d) => {
