@@ -196,6 +196,13 @@ export async function insertResource(r: Resource) {
   const { error } = await supa.from("resources").insert(r);
   if (error) throw error;
 }
+export async function insertResourcesBulk(rows: Resource[]) {
+  await requireRole("admin");
+  if (!rows.length) return;
+  const supa = getSupabase();
+  const { error } = await supa.from("resources").upsert(rows);
+  if (error) throw error;
+}
 export async function updateResource(id: string, patch: Partial<Resource>) {
   await requireRole("admin");
   const supa = getSupabase();
@@ -286,4 +293,47 @@ export async function bulkReplaceState(s: AppState) {
     const { error } = await supa.from("bookings").insert(bkRows);
     if (error) throw error;
   }
+}
+
+/* invoices — admin only (attached to material estimates, part of the P&L tab) */
+export interface InvoiceRow {
+  id: string;
+  fileName: string;
+  uploadedAt: string;
+  url: string;
+}
+export async function listInvoices(projectId: string): Promise<InvoiceRow[]> {
+  await requireRole("admin");
+  const supa = getSupabase();
+  const { data, error } = await supa
+    .from("invoices")
+    .select("*")
+    .eq("project_id", projectId)
+    .order("uploaded_at", { ascending: false });
+  if (error) throw error;
+  return (data || []).map((r) => ({
+    id: r.id,
+    fileName: r.file_name,
+    uploadedAt: r.uploaded_at,
+    url: supa.storage.from("invoices").getPublicUrl(r.storage_path).data.publicUrl,
+  }));
+}
+export async function uploadInvoice(projectId: string, fileName: string, contentType: string, base64Data: string) {
+  await requireRole("admin");
+  const supa = getSupabase();
+  const buffer = Buffer.from(base64Data, "base64");
+  const path = `${projectId}/${Date.now()}_${fileName}`;
+  const { error: upErr } = await supa.storage.from("invoices").upload(path, buffer, { contentType });
+  if (upErr) throw upErr;
+  const { error: insErr } = await supa.from("invoices").insert({ project_id: projectId, file_name: fileName, storage_path: path });
+  if (insErr) throw insErr;
+}
+export async function deleteInvoice(id: string) {
+  await requireRole("admin");
+  const supa = getSupabase();
+  const { data: row, error: readErr } = await supa.from("invoices").select("storage_path").eq("id", id).single();
+  if (readErr) throw readErr;
+  await supa.storage.from("invoices").remove([row.storage_path]);
+  const { error } = await supa.from("invoices").delete().eq("id", id);
+  if (error) throw error;
 }

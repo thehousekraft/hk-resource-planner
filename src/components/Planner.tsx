@@ -13,8 +13,11 @@ export default function Planner({
   setActiveLoc,
   selection,
   readOnly,
+  renamingProjectId,
   onSetCurrent,
   onAddProject,
+  onRename,
+  onRenameDone,
   onSetPrimary,
   onClearPrimary,
   onCycleOt,
@@ -27,8 +30,11 @@ export default function Planner({
   setActiveLoc: (l: Loc) => void;
   selection: Set<string>;
   readOnly: boolean;
+  renamingProjectId: string | null;
   onSetCurrent: (id: string) => void;
   onAddProject: () => void;
+  onRename: (id: string, name: string) => void;
+  onRenameDone: () => void;
   onSetPrimary: (date: string, resId: string) => void;
   onClearPrimary: (date: string, resId: string) => void;
   onCycleOt: (date: string, resId: string) => void;
@@ -95,12 +101,37 @@ export default function Planner({
     <div className="card" onMouseUp={() => (dragging.current = false)}>
       <div className="planner-toolbar">
         <div className="legend">
-          {projects.map((p) => (
-            <button key={p.id} className={"legchip" + (p.id === current ? " active" : "")} onClick={() => onSetCurrent(p.id)}>
-              <span className="sw" style={{ background: p.color }} />
-              {p.name}
-            </button>
-          ))}
+          {projects.map((p) =>
+            p.id === renamingProjectId ? (
+              <span key={p.id} className="legchip active" style={{ padding: "2px 6px 2px 10px" }}>
+                <span className="sw" style={{ background: p.color }} />
+                <input
+                  autoFocus
+                  type="text"
+                  defaultValue={p.name}
+                  style={{ width: 140, padding: "3px 6px", border: "1px solid var(--line-strong)", borderRadius: 6 }}
+                  onFocus={(e) => e.target.select()}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      onRename(p.id, e.currentTarget.value.trim() || p.name);
+                      onRenameDone();
+                    } else if (e.key === "Escape") {
+                      onRenameDone();
+                    }
+                  }}
+                  onBlur={(e) => {
+                    onRename(p.id, e.target.value.trim() || p.name);
+                    onRenameDone();
+                  }}
+                />
+              </span>
+            ) : (
+              <button key={p.id} className={"legchip" + (p.id === current ? " active" : "")} onClick={() => onSetCurrent(p.id)}>
+                <span className="sw" style={{ background: p.color }} />
+                {p.name}
+              </button>
+            ),
+          )}
         </div>
         {!readOnly && (
           <button className="btn sm" onClick={onAddProject}>

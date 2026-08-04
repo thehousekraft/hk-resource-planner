@@ -80,12 +80,14 @@ export default function App({
   }
 
   const curProj = useMemo(() => projects.find((p) => p.id === current) || projects[0], [projects, current]);
+  const [renamingProjectId, setRenamingProjectId] = useState<string | null>(null);
 
   /* ---------- project mutations ---------- */
   function addProject() {
     const p = blankProject("Project " + (projects.length + 1), projects.length);
     setProjects((prev) => [...prev, p]);
     setCurrent(p.id);
+    setRenamingProjectId(p.id);
     markSaved();
     actions.insertProject({ id: p.id, name: p.name, color: p.color, revenue: 0 }).catch(fail);
   }
@@ -287,6 +289,17 @@ export default function App({
     markSaved();
     actions.insertResource(p).catch(fail);
   }
+  function uploadResourcesExcel(rows: Omit<Resource, "id">[]) {
+    if (!rows.length) return;
+    const stamp = Date.now().toString(36);
+    const created: Resource[] = rows.map((r, i) => ({
+      id: "r" + stamp + i.toString(36) + Math.random().toString(36).slice(2, 5),
+      ...r,
+    }));
+    setRoster((prev) => [...prev, ...created]);
+    markSaved();
+    actions.insertResourcesBulk(created).catch(fail);
+  }
   function updatePerson(id: string, patch: Partial<Resource>) {
     setRoster((prev) => prev.map((p) => (p.id === id ? { ...p, ...patch } : p)));
     markSaved();
@@ -367,7 +380,7 @@ export default function App({
       <div className="tabs">
         {([
           ["plan", "Calendar planner"],
-          ["pnl", "Activity/Project P&L"],
+          ["pnl", "Activity/Scope P&L"],
           ["dash", "Portfolio dashboard"],
           ["bench", "Bench & utilisation"],
           ["daily", "Daily allocation (WhatsApp)"],
@@ -388,8 +401,11 @@ export default function App({
           setActiveLoc={setActiveLoc}
           selection={selection}
           readOnly={isViewer}
+          renamingProjectId={renamingProjectId}
           onSetCurrent={setCurrent}
           onAddProject={addProject}
+          onRename={renameProject}
+          onRenameDone={() => setRenamingProjectId(null)}
           onSetPrimary={setPrimary}
           onClearPrimary={clearPrimary}
           onCycleOt={cycleOt}
@@ -440,6 +456,7 @@ export default function App({
           <Roster
             state={state}
             onAddPerson={addPerson}
+            onUploadExcel={uploadResourcesExcel}
             onUpdatePerson={updatePerson}
             onDeletePerson={deletePerson}
             onReset={resetRoster}

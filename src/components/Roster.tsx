@@ -13,6 +13,7 @@ function r0(n: number) {
 export default function Roster({
   state,
   onAddPerson,
+  onUploadExcel,
   onUpdatePerson,
   onDeletePerson,
   onReset,
@@ -20,6 +21,7 @@ export default function Roster({
 }: {
   state: AppState;
   onAddPerson: (r: Omit<Resource, "id">) => void;
+  onUploadExcel: (rows: Omit<Resource, "id">[]) => void;
   onUpdatePerson: (id: string, patch: Partial<Resource>) => void;
   onDeletePerson: (id: string, name: string) => void;
   onReset: () => void;
@@ -31,6 +33,7 @@ export default function Roster({
   const [newUnit, setNewUnit] = useState<Unit>("day");
   const [newRate, setNewRate] = useState("");
   const fileInput = useRef<HTMLInputElement>(null);
+  const excelInput = useRef<HTMLInputElement>(null);
 
   function addPerson() {
     const name = newName.trim();
@@ -44,6 +47,45 @@ export default function Roster({
     setNewName("");
     setNewTrade("");
     setNewRate("");
+  }
+
+  function handleExcelUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const buf = reader.result as ArrayBuffer;
+        const wb = XLSX.read(buf, { type: "array" });
+        const sheet = wb.Sheets[wb.SheetNames[0]];
+        const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: "" });
+        const get = (row: Record<string, unknown>, keys: string[]) => {
+          for (const k of Object.keys(row)) {
+            if (keys.includes(k.trim().toLowerCase())) return row[k];
+          }
+          return undefined;
+        };
+        const parsed: Omit<Resource, "id">[] = rows
+          .map((row) => {
+            const name = String(get(row, ["name", "full name"]) ?? "").trim();
+            const trade = String(get(row, ["trade"]) ?? "").trim();
+            const unitRaw = String(get(row, ["billing", "unit"]) ?? "day").trim().toLowerCase();
+            const unit: Unit = unitRaw.includes("sqft") ? "sqft" : "day";
+            const rate = Number(get(row, ["rate"])) || 0;
+            return { name, trade, unit, rate };
+          })
+          .filter((r) => r.name);
+        if (!parsed.length) {
+          alert("No valid rows found. Expected columns: Name, Trade, Billing, Rate.");
+          return;
+        }
+        onUploadExcel(parsed);
+      } catch {
+        alert("Could not read that Excel file. Expected columns: Name, Trade, Billing, Rate.");
+      }
+    };
+    reader.readAsArrayBuffer(f);
+    e.target.value = "";
   }
 
   function exportJson() {
@@ -250,6 +292,15 @@ export default function Roster({
         <button className="btn primary" onClick={addPerson}>
           Add
         </button>
+      </div>
+      <div className="row" style={{ marginTop: 12 }}>
+        <button className="btn sm" onClick={() => excelInput.current?.click()}>
+          Upload Excel
+        </button>
+        <input ref={excelInput} type="file" accept=".xlsx,.xls" hidden onChange={handleExcelUpload} />
+        <span className="muted" style={{ fontSize: 12 }}>
+          Columns expected: Name, Trade, Billing (day/sqft), Rate. Adds to the existing roster.
+        </span>
       </div>
       <div className="row" style={{ marginTop: 18 }}>
         <button className="btn primary sm" onClick={exportXlsx}>

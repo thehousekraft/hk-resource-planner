@@ -1,8 +1,21 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import type { AppState, AreaLine, MaterialLine } from "@/lib/types";
 import { CUR, NUM, OT_HR_FRAC, countBand, countBandLoc, isSqft, projStats, sumOtHours } from "@/lib/calc";
+import { deleteInvoice, listInvoices, uploadInvoice, type InvoiceRow } from "@/app/actions";
+
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result as string;
+      resolve(result.split(",")[1] || "");
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
 
 export default function Pnl({
   state,
@@ -33,6 +46,43 @@ export default function Pnl({
 }) {
   const { roster, projects, current, bookings } = state;
   const proj = projects.find((p) => p.id === current);
+
+  const [showInvoiceModal, setShowInvoiceModal] = useState(false);
+  const [invoices, setInvoices] = useState<InvoiceRow[]>([]);
+  const [uploading, setUploading] = useState(false);
+
+  useEffect(() => {
+    if (!proj) return;
+    listInvoices(proj.id)
+      .then(setInvoices)
+      .catch((err) => console.error(err));
+  }, [proj?.id]);
+
+  async function handleInvoiceFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0];
+    if (!f || !proj) return;
+    setUploading(true);
+    try {
+      const base64 = await fileToBase64(f);
+      await uploadInvoice(proj.id, f.name, f.type || "application/octet-stream", base64);
+      setInvoices(await listInvoices(proj.id));
+    } catch (err) {
+      alert("Upload failed: " + (err instanceof Error ? err.message : String(err)));
+    } finally {
+      setUploading(false);
+      e.target.value = "";
+    }
+  }
+
+  async function handleDeleteInvoice(id: string) {
+    if (!proj) return;
+    try {
+      await deleteInvoice(id);
+      setInvoices(await listInvoices(proj.id));
+    } catch (err) {
+      alert("Could not delete: " + (err instanceof Error ? err.message : String(err)));
+    }
+  }
 
   const sqftPeople = proj
     ? roster.filter((p) => isSqft(p) && (countBand(state, p.id, proj.id, "P") || sumOtHours(state, p.id, proj.id)))
@@ -78,6 +128,74 @@ export default function Pnl({
           <button className="btn warn sm spacer" style={{ alignSelf: "flex-end" }} onClick={() => onDelete(proj.id)}>
             Delete project
           </button>
+        </div>
+      </div>
+
+      <div className="card">
+        <h2>Activity/Scope Price quoted</h2>
+        <div className="sub">Client-billed / quoted value for this project.</div>
+        <div className="rev-grid">
+          <label>Activity/Scope Price quoted</label>
+          <input
+            type="number"
+            min={0}
+            step={1000}
+            placeholder="0"
+            value={proj.revenue || ""}
+            onChange={(e) => onSetRevenue(proj.id, Number(e.target.value) || 0)}
+          />
+        </div>
+
+        <h2 style={{ marginTop: 22 }}>Material estimate</h2>
+        <div className="sub">Material line items for this project.</div>
+        <div className="mat-row mat-head">
+          <div>Item</div>
+          <div>Estimate cost</div>
+          <div />
+        </div>
+        {proj.materials.map((m) => (
+          <div className="mat-row" key={m.id}>
+            <input
+              type="text"
+              placeholder="e.g. Plywood, laminate"
+              value={m.item}
+              onChange={(e) => onUpdateMaterial(m.id, { item: e.target.value })}
+            />
+            <input
+              type="number"
+              placeholder="0"
+              min={0}
+              value={m.cost || ""}
+              onChange={(e) => onUpdateMaterial(m.id, { cost: Number(e.target.value) || 0 })}
+            />
+            <button className="del-x" onClick={() => onDeleteMaterial(m.id)}>
+              ×
+            </button>
+          </div>
+        ))}
+        <button className="btn sm" onClick={onAddMaterial}>
+          + Add material
+        </button>
+
+        <div style={{ marginTop: 18, paddingTop: 16, borderTop: "1px solid var(--line)" }}>
+          <button className="btn sm" onClick={() => setShowInvoiceModal(true)}>
+            Upload invoice
+          </button>
+          {invoices.length > 0 && (
+            <div style={{ marginTop: 10 }}>
+              {invoices.map((inv) => (
+                <div key={inv.id} className="row" style={{ fontSize: 12.5, padding: "4px 0" }}>
+                  <a href={inv.url} target="_blank" rel="noopener noreferrer">
+                    {inv.fileName}
+                  </a>
+                  <span className="muted">{new Date(inv.uploadedAt).toLocaleDateString()}</span>
+                  <button className="del-x" style={{ fontSize: 14 }} onClick={() => handleDeleteInvoice(inv.id)}>
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 
@@ -203,56 +321,7 @@ export default function Pnl({
       </div>
 
       <div className="card">
-        <h2>Material cost</h2>
-        <div className="sub">Material line items for this project.</div>
-        <div className="mat-row mat-head">
-          <div>Item</div>
-          <div>Cost</div>
-          <div />
-        </div>
-        {proj.materials.map((m) => (
-          <div className="mat-row" key={m.id}>
-            <input
-              type="text"
-              placeholder="e.g. Plywood, laminate"
-              value={m.item}
-              onChange={(e) => onUpdateMaterial(m.id, { item: e.target.value })}
-            />
-            <input
-              type="number"
-              placeholder="0"
-              min={0}
-              value={m.cost || ""}
-              onChange={(e) => onUpdateMaterial(m.id, { cost: Number(e.target.value) || 0 })}
-            />
-            <button className="del-x" onClick={() => onDeleteMaterial(m.id)}>
-              ×
-            </button>
-          </div>
-        ))}
-        <button className="btn sm" onClick={onAddMaterial}>
-          + Add material
-        </button>
-      </div>
-
-      <div className="card">
-        <h2>Revenue</h2>
-        <div className="sub">Client-billed / quoted value for this project.</div>
-        <div className="rev-grid">
-          <label>Project revenue</label>
-          <input
-            type="number"
-            min={0}
-            step={1000}
-            placeholder="0"
-            value={proj.revenue || ""}
-            onChange={(e) => onSetRevenue(proj.id, Number(e.target.value) || 0)}
-          />
-        </div>
-      </div>
-
-      <div className="card">
-        <h2>Activity / Project P&amp;L</h2>
+        <h2>Activity/Scope P&amp;L</h2>
         <div className="sub">{proj.name} · all-months total</div>
         <div className="sumstrip">
           <div className="cell2">
@@ -286,6 +355,20 @@ export default function Pnl({
           <div className="cell2">
             <div className="k">Margin</div>
             <div className={"v " + (s.profit >= 0 ? "pos" : "neg")}>{s.rev > 0 ? NUM.format(s.margin) + "%" : "—"}</div>
+          </div>
+        </div>
+      </div>
+
+      <div className={"modal-bg" + (showInvoiceModal ? " show" : "")}>
+        <div className="modal">
+          <h3>Upload invoice</h3>
+          <p>Attach the invoice file corresponding to the material cost for &quot;{proj.name}&quot;.</p>
+          <input type="file" accept=".pdf,.png,.jpg,.jpeg" onChange={handleInvoiceFile} disabled={uploading} />
+          {uploading && <p className="muted">Uploading…</p>}
+          <div className="row">
+            <button className="btn" onClick={() => setShowInvoiceModal(false)}>
+              Close
+            </button>
           </div>
         </div>
       </div>
