@@ -50,10 +50,10 @@ export default async function LandingPage() {
             fontSize: 18,
           }}
         >
-          S
+          H
         </div>
         <div style={{ fontFamily: "var(--font-newsreader), serif", fontSize: 17, fontWeight: 600, color: "#1a1a1a" }}>
-          Studio North <span style={{ color: "rgba(0,0,0,.35)", fontWeight: 400 }}>/ Operations</span>
+          TheHouseKraft <span style={{ color: "rgba(0,0,0,.35)", fontWeight: 400 }}>/ Operations</span>
         </div>
       </div>
 
