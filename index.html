@@ -299,8 +299,6 @@ const SUPABASE_URL='https://ofvazbhuvwdrrbfeqhii.supabase.co';
 const SUPABASE_ANON_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9mdmF6Ymh1dndkcnJiZmVxaGlpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODU4MzAzMjgsImV4cCI6MjEwMTQwNjMyOH0.11fmjEUDTMJ6YLI-PuKC863qCR7E5Rj9TcaNaPXgd5k';
 const supa=window.supabase.createClient(SUPABASE_URL,SUPABASE_ANON_KEY);
 
-/* default roster used only by "Reset to Manpower defaults" */
-const SEED = [{"id": "r1", "name": "Sanjay kumar", "trade": "Sn Carpenter", "rate": 1809.91, "unit": "day"}, {"id": "r2", "name": "Vikas kumar", "trade": "Jn Carpenter", "rate": 1287.76, "unit": "day"}, {"id": "r3", "name": "Gobari or laalbabu", "trade": "Sn Carpenter", "rate": 1809.91, "unit": "day"}, {"id": "r4", "name": "Dip Narayan Thakur", "trade": "Sn Carpenter", "rate": 1505.32, "unit": "day"}, {"id": "r5", "name": "Ganesh", "trade": "Jn Carpenter", "rate": 939.66, "unit": "day"}, {"id": "r6", "name": "Pintu", "trade": "Sn Electrician/Plumber", "rate": 1505.32, "unit": "day"}, {"id": "r7", "name": "Anil Kantiwal", "trade": "Sn Electrician/Plumber", "rate": 1635.86, "unit": "day"}, {"id": "r8", "name": "Madhusudan Verma Tony", "trade": "Jr Electrician", "rate": 1070.19, "unit": "day"}, {"id": "r9", "name": "Vishal Saini", "trade": "Electrician", "rate": 1287.76, "unit": "day"}, {"id": "r10", "name": "Tushar Saini", "trade": "Helper Electrician", "rate": 896.14, "unit": "day"}, {"id": "r11", "name": "Jinesh K S", "trade": "Sn Polishman", "rate": 1543.78, "unit": "day"}, {"id": "r12", "name": "Sumesh V", "trade": "Painter", "rate": 1287.76, "unit": "day"}, {"id": "r13", "name": "Sheenu S", "trade": "Sn Polishman", "rate": 1505.32, "unit": "day"}, {"id": "r14", "name": "Anish (Mangesh)", "trade": "Sn Painter", "rate": 1505.32, "unit": "day"}, {"id": "r15", "name": "Vinesh", "trade": "Sn Painter", "rate": 1505.32, "unit": "day"}, {"id": "r16", "name": "Vinod N", "trade": "Painter", "rate": 1287.76, "unit": "day"}, {"id": "r17", "name": "Susanta Kumar Behera", "trade": "Sn Polishman", "rate": 1505.32, "unit": "day"}, {"id": "r18", "name": "Vineesh TV", "trade": "Painter", "rate": 1409.17, "unit": "day"}, {"id": "r19", "name": "Bhagwan Takur", "trade": "Painter", "rate": 1409.17, "unit": "day"}, {"id": "r20", "name": "Mustaq Ahmed", "trade": "Site Management", "rate": 2544.2, "unit": "day"}, {"id": "r21", "name": "Touheed Khan", "trade": "Site Management", "rate": 1484.12, "unit": "day"}, {"id": "r22", "name": "Keerthesh N", "trade": "Site Management", "rate": 1484.12, "unit": "day"}, {"id": "r23", "name": "Prasanna", "trade": "Site Management", "rate": 1272.1, "unit": "day"}, {"id": "r24", "name": "Deepak Raj Shetty", "trade": "Service Management", "rate": 1144.89, "unit": "day"}, {"id": "r25", "name": "Abhishek", "trade": "Site Management", "rate": 636.05, "unit": "day"}, {"id": "r26", "name": "Zubair", "trade": "Sn Assembler", "rate": 110, "unit": "sqft"}, {"id": "r27", "name": "Zawar", "trade": "Jn Assembler", "rate": 110, "unit": "sqft"}, {"id": "r28", "name": "Shaik", "trade": "Jn Assembler", "rate": 110, "unit": "sqft"}, {"id": "r29", "name": "Shafi", "trade": "Sn Assembler", "rate": 110, "unit": "sqft"}, {"id": "r30", "name": "Abdul", "trade": "Jn Assembler", "rate": 110, "unit": "sqft"}, {"id": "r31", "name": "Ram", "trade": "Jn Assembler", "rate": 110, "unit": "sqft"}, {"id": "r32", "name": "Nakul", "trade": "Jn Assembler", "rate": 110, "unit": "sqft"}, {"id": "r33", "name": "Uttam PoP", "trade": "Gypsum", "rate": 25, "unit": "sqft"}, {"id": "r34", "name": "Manoj", "trade": "Gypsum", "rate": 25, "unit": "sqft"}, {"id": "r35", "name": "Ram", "trade": "Gypsum", "rate": 25, "unit": "sqft"}, {"id": "r36", "name": "Santosh", "trade": "Gypsum", "rate": 25, "unit": "sqft"}, {"id": "r37", "name": "Helper 1", "trade": "Helper", "rate": 10, "unit": "sqft"}, {"id": "r38", "name": "Helper 2", "trade": "Helper", "rate": 10, "unit": "sqft"}, {"id": "r39", "name": "Helper 3", "trade": "Helper", "rate": 10, "unit": "sqft"}, {"id": "r40", "name": "Helper 4", "trade": "Helper", "rate": 10, "unit": "sqft"}, {"id": "r41", "name": "Mujamil Zari", "trade": "QC", "rate": 1692.31, "unit": "day"}];
 const PALETTE=['#1f6f5c','#2d5f8a','#a8562a','#7a4a86','#3f7d3f','#b23b3b','#8a6d1f','#4a5568','#307a7a','#9a4a6a'];
 const CUR=new Intl.NumberFormat('en-IN',{style:'currency',currency:'INR',maximumFractionDigits:0});
 const NUM=new Intl.NumberFormat('en-IN',{maximumFractionDigits:1});
@@ -822,12 +820,16 @@ document.getElementById('addPerson').onclick=()=>{
 };
 document.getElementById('resetBtn').onclick=async()=>{
   if(!confirm('Reset roster to original Manpower list? Custom people and their bookings are removed.'))return;
-  const ids=new Set(SEED.map(p=>p.id));
+  const {data:defaults,error:defErr}=await supa.from('roster_defaults').select('*');
+  if(defErr){sbFail(defErr);return;}
+  if(!defaults||!defaults.length){alert('No default roster snapshot found in the database.');return;}
+  const seed=defaults.map(r=>({id:r.id,name:r.name,trade:r.trade,rate:Number(r.rate),unit:r.unit}));
+  const ids=new Set(seed.map(p=>p.id));
   for(const k in state.bookings){if(!ids.has(k.split('|')[1]))delete state.bookings[k];}
   const toRemove=state.roster.filter(p=>!ids.has(p.id)).map(p=>p.id);
-  state.roster=JSON.parse(JSON.stringify(SEED));save();renderRoster();renderPlanner();
+  state.roster=seed;save();renderRoster();renderPlanner();
   if(toRemove.length){const {error:delErr}=await supa.from('resources').delete().in('id',toRemove);if(delErr)sbFail(delErr);}
-  const {error:upErr}=await supa.from('resources').upsert(SEED);
+  const {error:upErr}=await supa.from('resources').upsert(seed);
   if(upErr)sbFail(upErr);
 };
 
