@@ -12,10 +12,11 @@ import Dashboard from "@/components/Dashboard";
 import Bench from "@/components/Bench";
 import Daily from "@/components/Daily";
 import Roster from "@/components/Roster";
+import Users from "@/components/Users";
 
 const UI_KEY = "resPlanner.ui.v1";
-type Tab = "plan" | "pnl" | "dash" | "bench" | "daily" | "roster";
-const ADMIN_ONLY_TABS: Tab[] = ["pnl", "dash", "roster"];
+type Tab = "plan" | "pnl" | "dash" | "bench" | "daily" | "roster" | "users";
+const ADMIN_ONLY_TABS: Tab[] = ["pnl", "dash", "roster", "users"];
 
 function loadUiPrefs(): { month?: string; current?: string } {
   try {
@@ -30,11 +31,13 @@ export default function App({
   initialProjects,
   initialBookings,
   role,
+  currentUserId,
 }: {
   initialRoster: Resource[];
   initialProjects: Project[];
   initialBookings: BookingsMap;
   role: Role;
+  currentUserId: string;
 }) {
   const isAdmin = role === "admin";
   const isViewer = role === "viewer";
@@ -402,6 +405,7 @@ export default function App({
           ["bench", "Bench & utilisation"],
           ["daily", "Daily allocation (WhatsApp)"],
           ["roster", "Manage resources"],
+          ["users", "Manage users"],
         ] as [Tab, string][])
           .filter(([id]) => isAdmin || !ADMIN_ONLY_TABS.includes(id))
           .map(([id, label]) => (
@@ -480,6 +484,12 @@ export default function App({
             onClearAll={clearRoster}
             onImport={importBackup}
           />
+        </section>
+      )}
+
+      {isAdmin && (
+        <section className={"panel" + (activeTab === "users" ? " active" : "")}>
+          <Users currentUserId={currentUserId} />
         </section>
       )}
     </div>

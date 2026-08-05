@@ -6,7 +6,7 @@ import App from "@/components/App";
 export const dynamic = "force-dynamic";
 
 export default async function Page() {
-  const { role } = await ensureProfile();
+  const { role, userId } = await ensureProfile();
 
   let roster, projects, bookings;
   try {
@@ -32,5 +32,5 @@ export default async function Page() {
     projects = [p];
   }
 
-  return <App initialRoster={roster} initialProjects={projects} initialBookings={bookings} role={role} />;
+  return <App initialRoster={roster} initialProjects={projects} initialBookings={bookings} role={role} currentUserId={userId} />;
 }
