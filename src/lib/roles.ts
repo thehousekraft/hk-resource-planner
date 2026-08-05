@@ -1,6 +1,7 @@
 import { auth, currentUser } from "@clerk/nextjs/server";
 import { getSupabase } from "./supabase";
 import type { Role } from "./roleTypes";
+import { ALL_TAB_KEYS, DEFAULT_ALLOWED_TABS, type TabKey } from "./tabs";
 
 export type { Role } from "./roleTypes";
 export { COMPANY_DOMAIN, isCompanyEmail } from "./roleTypes";
@@ -46,6 +47,27 @@ export async function requireRole(...allowed: Role[]) {
   const role = await getRole();
   if (!allowed.includes(role)) {
     throw new Error("Forbidden: insufficient permissions");
+  }
+  return role;
+}
+
+/** Admin always has every tab; editor/viewer are governed by the configurable role_permissions table. */
+export async function getAllowedTabs(role: Role): Promise<TabKey[]> {
+  if (role === "admin") return ALL_TAB_KEYS;
+  const supa = getSupabase();
+  const { data, error } = await supa.from("role_permissions").select("allowed_tabs").eq("role", role).maybeSingle();
+  if (error) throw error;
+  return (data?.allowed_tabs as TabKey[] | undefined) || DEFAULT_ALLOWED_TABS[role] || [];
+}
+
+/** Like requireRole, but for actions whose access should follow the configurable tab permissions
+ *  rather than a hardcoded role list (e.g. roster edits gated behind the "roster" tab). Admin always passes. */
+export async function requireTabAccess(tab: TabKey) {
+  const role = await getRole();
+  if (role === "admin") return role;
+  const tabs = await getAllowedTabs(role);
+  if (!tabs.includes(tab)) {
+    throw new Error("Forbidden: your role doesn't have access to this section");
   }
   return role;
 }

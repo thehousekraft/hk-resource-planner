@@ -3,17 +3,21 @@
 import { useEffect, useState } from "react";
 import type { Role } from "@/lib/roleTypes";
 import { COMPANY_DOMAIN } from "@/lib/roleTypes";
+import { CONFIGURABLE_TABS, type ConfigurableRole, type TabKey } from "@/lib/tabs";
 import {
+  getRolePermissionsMatrix,
   inviteUser,
   listPendingInvitations,
   listUsers,
   revokeInvitation,
+  updateRolePermissions,
   updateUserRole,
   type PendingInviteRow,
   type UserRow,
 } from "@/app/userActions";
 
 const ROLES: Role[] = ["admin", "editor", "viewer"];
+const CONFIGURABLE_ROLES: ConfigurableRole[] = ["editor", "viewer"];
 
 export default function Users({ currentUserId }: { currentUserId: string }) {
   const [users, setUsers] = useState<UserRow[]>([]);
@@ -22,6 +26,10 @@ export default function Users({ currentUserId }: { currentUserId: string }) {
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<Role>("viewer");
   const [sending, setSending] = useState(false);
+
+  const [permissions, setPermissions] = useState<Record<ConfigurableRole, TabKey[]>>({ editor: [], viewer: [] });
+  const [permsLoading, setPermsLoading] = useState(true);
+  const [savingPerms, setSavingPerms] = useState(false);
 
   async function refresh() {
     setLoading(true);
@@ -36,8 +44,20 @@ export default function Users({ currentUserId }: { currentUserId: string }) {
     }
   }
 
+  async function refreshPermissions() {
+    setPermsLoading(true);
+    try {
+      setPermissions(await getRolePermissionsMatrix());
+    } catch (e) {
+      alert("Could not load role permissions: " + (e instanceof Error ? e.message : String(e)));
+    } finally {
+      setPermsLoading(false);
+    }
+  }
+
   useEffect(() => {
     refresh();
+    refreshPermissions();
   }, []);
 
   async function handleInvite() {
@@ -82,119 +102,210 @@ export default function Users({ currentUserId }: { currentUserId: string }) {
     }
   }
 
+  function toggleTab(r: ConfigurableRole, tab: TabKey) {
+    setPermissions((prev) => {
+      const has = prev[r].includes(tab);
+      return { ...prev, [r]: has ? prev[r].filter((t) => t !== tab) : [...prev[r], tab] };
+    });
+  }
+
+  async function handleSavePermissions() {
+    setSavingPerms(true);
+    try {
+      await Promise.all(CONFIGURABLE_ROLES.map((r) => updateRolePermissions(r, permissions[r])));
+    } catch (e) {
+      alert("Could not save permissions: " + (e instanceof Error ? e.message : String(e)));
+    } finally {
+      setSavingPerms(false);
+    }
+  }
+
   return (
-    <div className="card">
-      <h2>Manage users</h2>
-      <div className="sub">
-        Only {COMPANY_DOMAIN} email addresses can be invited. There is no public sign-up — access is invite-only.
+    <>
+      <div className="card">
+        <h2>Manage users</h2>
+        <div className="sub">
+          Only {COMPANY_DOMAIN} email addresses can be invited. There is no public sign-up — access is invite-only.
+        </div>
+
+        <div className="addrow" style={{ gridTemplateColumns: "1.6fr 1fr auto", marginTop: 4 }}>
+          <div className="fld">
+            <label>Email</label>
+            <input
+              type="email"
+              placeholder={`name${COMPANY_DOMAIN}`}
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+            />
+          </div>
+          <div className="fld">
+            <label>Role</label>
+            <select value={role} onChange={(e) => setRole(e.target.value as Role)}>
+              {ROLES.map((r) => (
+                <option key={r} value={r}>
+                  {r}
+                </option>
+              ))}
+            </select>
+          </div>
+          <button className="btn primary" onClick={handleInvite} disabled={sending}>
+            {sending ? "Sending…" : "Send invite"}
+          </button>
+        </div>
+
+        {loading ? (
+          <div className="empty">Loading…</div>
+        ) : (
+          <>
+            <h3 style={{ marginTop: 24, fontSize: 13.5 }}>Active users</h3>
+            {!users.length ? (
+              <div className="empty">No users yet.</div>
+            ) : (
+              <table className="rtable">
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Email</th>
+                    <th className="narrow">Role</th>
+                    <th className="narrow">Joined</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {users.map((u) => (
+                    <tr key={u.clerkUserId}>
+                      <td>{u.name || "—"}</td>
+                      <td>{u.email}</td>
+                      <td className="narrow">
+                        {u.clerkUserId === currentUserId ? (
+                          <span className="badge b-day" style={{ textTransform: "capitalize" }}>
+                            {u.role} (you)
+                          </span>
+                        ) : (
+                          <select value={u.role} onChange={(e) => handleRoleChange(u.clerkUserId, e.target.value as Role)}>
+                            {ROLES.map((r) => (
+                              <option key={r} value={r}>
+                                {r}
+                              </option>
+                            ))}
+                          </select>
+                        )}
+                      </td>
+                      <td className="narrow muted" style={{ fontSize: 12 }}>
+                        {new Date(u.createdAt).toLocaleDateString()}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+
+            <h3 style={{ marginTop: 24, fontSize: 13.5 }}>Pending invitations</h3>
+            {!invites.length ? (
+              <div className="empty">No pending invitations.</div>
+            ) : (
+              <table className="rtable">
+                <thead>
+                  <tr>
+                    <th>Email</th>
+                    <th className="narrow">Role</th>
+                    <th className="narrow">Invited</th>
+                    <th style={{ width: 40 }} />
+                  </tr>
+                </thead>
+                <tbody>
+                  {invites.map((i) => (
+                    <tr key={i.id}>
+                      <td>{i.email}</td>
+                      <td className="narrow" style={{ textTransform: "capitalize" }}>
+                        {i.role}
+                      </td>
+                      <td className="narrow muted" style={{ fontSize: 12 }}>
+                        {new Date(i.createdAt).toLocaleDateString()}
+                      </td>
+                      <td>
+                        <button className="del-x" onClick={() => handleRevoke(i.id)}>
+                          ×
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </>
+        )}
       </div>
 
-      <div className="addrow" style={{ gridTemplateColumns: "1.6fr 1fr auto", marginTop: 4 }}>
-        <div className="fld">
-          <label>Email</label>
-          <input
-            type="email"
-            placeholder={`name${COMPANY_DOMAIN}`}
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-          />
+      <div className="card">
+        <h2>Role permissions</h2>
+        <div className="sub">
+          Choose which pages each role can see. Admin always has full access to every page, including this one, and
+          isn&apos;t editable here.
         </div>
-        <div className="fld">
-          <label>Role</label>
-          <select value={role} onChange={(e) => setRole(e.target.value as Role)}>
-            {ROLES.map((r) => (
-              <option key={r} value={r}>
-                {r}
-              </option>
-            ))}
-          </select>
-        </div>
-        <button className="btn primary" onClick={handleInvite} disabled={sending}>
-          {sending ? "Sending…" : "Send invite"}
-        </button>
+        {permsLoading ? (
+          <div className="empty">Loading…</div>
+        ) : (
+          <>
+            <div style={{ overflowX: "auto" }}>
+              <table className="rtable">
+                <thead>
+                  <tr>
+                    <th>Page</th>
+                    <th className="narrow" style={{ textAlign: "center" }}>
+                      Admin
+                    </th>
+                    <th className="narrow" style={{ textAlign: "center" }}>
+                      Editor
+                    </th>
+                    <th className="narrow" style={{ textAlign: "center" }}>
+                      Viewer
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {CONFIGURABLE_TABS.map((t) => (
+                    <tr key={t.key}>
+                      <td>{t.label}</td>
+                      <td style={{ textAlign: "center" }}>
+                        <input type="checkbox" checked disabled />
+                      </td>
+                      <td style={{ textAlign: "center" }}>
+                        <input
+                          type="checkbox"
+                          checked={permissions.editor.includes(t.key)}
+                          onChange={() => toggleTab("editor", t.key)}
+                        />
+                      </td>
+                      <td style={{ textAlign: "center" }}>
+                        <input
+                          type="checkbox"
+                          checked={permissions.viewer.includes(t.key)}
+                          onChange={() => toggleTab("viewer", t.key)}
+                        />
+                      </td>
+                    </tr>
+                  ))}
+                  <tr>
+                    <td>Manage users</td>
+                    <td style={{ textAlign: "center" }}>
+                      <input type="checkbox" checked disabled />
+                    </td>
+                    <td style={{ textAlign: "center" }} className="muted">
+                      admin only
+                    </td>
+                    <td style={{ textAlign: "center" }} className="muted">
+                      admin only
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <button className="btn primary sm" style={{ marginTop: 14 }} onClick={handleSavePermissions} disabled={savingPerms}>
+              {savingPerms ? "Saving…" : "Save changes"}
+            </button>
+          </>
+        )}
       </div>
-
-      {loading ? (
-        <div className="empty">Loading…</div>
-      ) : (
-        <>
-          <h3 style={{ marginTop: 24, fontSize: 13.5 }}>Active users</h3>
-          {!users.length ? (
-            <div className="empty">No users yet.</div>
-          ) : (
-            <table className="rtable">
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Email</th>
-                  <th className="narrow">Role</th>
-                  <th className="narrow">Joined</th>
-                </tr>
-              </thead>
-              <tbody>
-                {users.map((u) => (
-                  <tr key={u.clerkUserId}>
-                    <td>{u.name || "—"}</td>
-                    <td>{u.email}</td>
-                    <td className="narrow">
-                      {u.clerkUserId === currentUserId ? (
-                        <span className="badge b-day" style={{ textTransform: "capitalize" }}>
-                          {u.role} (you)
-                        </span>
-                      ) : (
-                        <select value={u.role} onChange={(e) => handleRoleChange(u.clerkUserId, e.target.value as Role)}>
-                          {ROLES.map((r) => (
-                            <option key={r} value={r}>
-                              {r}
-                            </option>
-                          ))}
-                        </select>
-                      )}
-                    </td>
-                    <td className="narrow muted" style={{ fontSize: 12 }}>
-                      {new Date(u.createdAt).toLocaleDateString()}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-
-          <h3 style={{ marginTop: 24, fontSize: 13.5 }}>Pending invitations</h3>
-          {!invites.length ? (
-            <div className="empty">No pending invitations.</div>
-          ) : (
-            <table className="rtable">
-              <thead>
-                <tr>
-                  <th>Email</th>
-                  <th className="narrow">Role</th>
-                  <th className="narrow">Invited</th>
-                  <th style={{ width: 40 }} />
-                </tr>
-              </thead>
-              <tbody>
-                {invites.map((i) => (
-                  <tr key={i.id}>
-                    <td>{i.email}</td>
-                    <td className="narrow" style={{ textTransform: "capitalize" }}>
-                      {i.role}
-                    </td>
-                    <td className="narrow muted" style={{ fontSize: 12 }}>
-                      {new Date(i.createdAt).toLocaleDateString()}
-                    </td>
-                    <td>
-                      <button className="del-x" onClick={() => handleRevoke(i.id)}>
-                        ×
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </>
-      )}
-    </div>
+    </>
   );
 }

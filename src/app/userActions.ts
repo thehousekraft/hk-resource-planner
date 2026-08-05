@@ -3,6 +3,7 @@
 import { auth, clerkClient } from "@clerk/nextjs/server";
 import { getSupabase } from "@/lib/supabase";
 import { COMPANY_DOMAIN, isCompanyEmail, requireRole, type Role } from "@/lib/roles";
+import { DEFAULT_ALLOWED_TABS, type ConfigurableRole, type TabKey } from "@/lib/tabs";
 
 export interface UserRow {
   clerkUserId: string;
@@ -73,5 +74,33 @@ export async function updateUserRole(clerkUserId: string, role: Role) {
   }
   const supa = getSupabase();
   const { error } = await supa.from("profiles").update({ role }).eq("clerk_user_id", clerkUserId);
+  if (error) throw error;
+}
+
+/* RBAC tab permissions — admin always has every tab (not stored/editable);
+   editor/viewer visibility into each page is configured here. */
+export async function getRolePermissionsMatrix(): Promise<Record<ConfigurableRole, TabKey[]>> {
+  await requireRole("admin");
+  const supa = getSupabase();
+  const { data, error } = await supa.from("role_permissions").select("*");
+  if (error) throw error;
+  const result: Record<ConfigurableRole, TabKey[]> = {
+    editor: DEFAULT_ALLOWED_TABS.editor,
+    viewer: DEFAULT_ALLOWED_TABS.viewer,
+  };
+  (data || []).forEach((row) => {
+    if (row.role === "editor" || row.role === "viewer") {
+      result[row.role as ConfigurableRole] = (row.allowed_tabs as TabKey[]) || [];
+    }
+  });
+  return result;
+}
+
+export async function updateRolePermissions(role: ConfigurableRole, allowedTabs: TabKey[]) {
+  await requireRole("admin");
+  const supa = getSupabase();
+  const { error } = await supa
+    .from("role_permissions")
+    .upsert({ role, allowed_tabs: allowedTabs.filter((t) => t !== "users") }, { onConflict: "role" });
   if (error) throw error;
 }

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { UserButton } from "@clerk/nextjs";
 import type { AreaLine, BookingsMap, MaterialLine, Project, Resource } from "@/lib/types";
 import type { Role } from "@/lib/roles";
+import type { TabKey } from "@/lib/tabs";
 import { blankProject } from "@/lib/calc";
 import * as actions from "@/app/actions";
 import Planner from "@/components/Planner";
@@ -15,8 +16,7 @@ import Roster from "@/components/Roster";
 import Users from "@/components/Users";
 
 const UI_KEY = "resPlanner.ui.v1";
-type Tab = "plan" | "pnl" | "dash" | "bench" | "daily" | "roster" | "users";
-const ADMIN_ONLY_TABS: Tab[] = ["pnl", "dash", "roster", "users"];
+type Tab = TabKey;
 
 function loadUiPrefs(): { month?: string; current?: string } {
   try {
@@ -32,21 +32,28 @@ export default function App({
   initialBookings,
   role,
   currentUserId,
+  allowedTabs,
 }: {
   initialRoster: Resource[];
   initialProjects: Project[];
   initialBookings: BookingsMap;
   role: Role;
   currentUserId: string;
+  allowedTabs: TabKey[];
 }) {
   const isAdmin = role === "admin";
   const isViewer = role === "viewer";
+  const canSee = (tab: Tab) => isAdmin || (tab !== "users" && allowedTabs.includes(tab));
   const [roster, setRoster] = useState<Resource[]>(initialRoster);
   const [projects, setProjects] = useState<Project[]>(initialProjects);
   const [bookings, setBookings] = useState<BookingsMap>(initialBookings);
   const [month, setMonth] = useState<string>(() => new Date().toISOString().slice(0, 7));
   const [current, setCurrent] = useState<string>(initialProjects[0]?.id ?? "");
-  const [activeTab, setActiveTab] = useState<Tab>("plan");
+  const [activeTab, setActiveTab] = useState<Tab>(() => {
+    const order: Tab[] = ["plan", "pnl", "dash", "bench", "daily", "roster", "users"];
+    const canSeeAtMount = (tab: Tab) => role === "admin" || (tab !== "users" && allowedTabs.includes(tab));
+    return order.find(canSeeAtMount) ?? "plan";
+  });
   const [saved, setSaved] = useState(false);
   const [selection, setSelection] = useState<Set<string>>(new Set());
 
@@ -407,7 +414,7 @@ export default function App({
           ["roster", "Manage resources"],
           ["users", "Manage users"],
         ] as [Tab, string][])
-          .filter(([id]) => isAdmin || !ADMIN_ONLY_TABS.includes(id))
+          .filter(([id]) => canSee(id))
           .map(([id, label]) => (
             <button key={id} className={"tab" + (activeTab === id ? " active" : "")} onClick={() => setActiveTab(id)}>
               {label}
@@ -415,31 +422,33 @@ export default function App({
           ))}
       </div>
 
-      <section className={"panel" + (activeTab === "plan" ? " active" : "")}>
-        <Planner
-          state={state}
-          activeLoc={activeLoc}
-          setActiveLoc={setActiveLoc}
-          selection={selection}
-          readOnly={isViewer}
-          renamingProjectId={renamingProjectId}
-          onSetCurrent={setCurrent}
-          onAddProject={addProject}
-          onRename={renameProject}
-          onRenameDone={() => setRenamingProjectId(null)}
-          onSetPrimary={setPrimary}
-          onClearPrimary={clearPrimary}
-          onCycleOt={cycleOt}
-          onToggleSelect={toggleSelect}
-          onClearSelection={() => {
-            setSelection(new Set());
-            markSaved();
-          }}
-          onMoveSelected={moveSelected}
-        />
-      </section>
+      {canSee("plan") && (
+        <section className={"panel" + (activeTab === "plan" ? " active" : "")}>
+          <Planner
+            state={state}
+            activeLoc={activeLoc}
+            setActiveLoc={setActiveLoc}
+            selection={selection}
+            readOnly={isViewer}
+            renamingProjectId={renamingProjectId}
+            onSetCurrent={setCurrent}
+            onAddProject={addProject}
+            onRename={renameProject}
+            onRenameDone={() => setRenamingProjectId(null)}
+            onSetPrimary={setPrimary}
+            onClearPrimary={clearPrimary}
+            onCycleOt={cycleOt}
+            onToggleSelect={toggleSelect}
+            onClearSelection={() => {
+              setSelection(new Set());
+              markSaved();
+            }}
+            onMoveSelected={moveSelected}
+          />
+        </section>
+      )}
 
-      {isAdmin && (
+      {canSee("pnl") && (
         <section className={"panel" + (activeTab === "pnl" ? " active" : "")}>
           <Pnl
             state={state}
@@ -458,21 +467,25 @@ export default function App({
         </section>
       )}
 
-      {isAdmin && (
+      {canSee("dash") && (
         <section className={"panel" + (activeTab === "dash" ? " active" : "")}>
           <Dashboard state={state} />
         </section>
       )}
 
-      <section className={"panel" + (activeTab === "bench" ? " active" : "")}>
-        <Bench state={state} />
-      </section>
+      {canSee("bench") && (
+        <section className={"panel" + (activeTab === "bench" ? " active" : "")}>
+          <Bench state={state} />
+        </section>
+      )}
 
-      <section className={"panel" + (activeTab === "daily" ? " active" : "")}>
-        <Daily state={state} />
-      </section>
+      {canSee("daily") && (
+        <section className={"panel" + (activeTab === "daily" ? " active" : "")}>
+          <Daily state={state} />
+        </section>
+      )}
 
-      {isAdmin && (
+      {canSee("roster") && (
         <section className={"panel" + (activeTab === "roster" ? " active" : "")}>
           <Roster
             state={state}

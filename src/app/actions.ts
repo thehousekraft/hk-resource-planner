@@ -1,7 +1,7 @@
 "use server";
 
 import { getSupabase } from "@/lib/supabase";
-import { getRole, requireRole } from "@/lib/roles";
+import { getAllowedTabs, getRole, requireRole, requireTabAccess } from "@/lib/roles";
 import type { AppState, Band, Loc, Project, Resource } from "@/lib/types";
 import { bkey } from "@/lib/types";
 
@@ -11,6 +11,8 @@ export async function loadState(): Promise<{
   bookings: AppState["bookings"];
 }> {
   const role = await getRole();
+  const allowedTabs = await getAllowedTabs(role);
+  const canSeeFinance = allowedTabs.includes("pnl") || allowedTabs.includes("dash") || allowedTabs.includes("roster");
   const supa = getSupabase();
   const [
     { data: resources, error: e1 },
@@ -28,13 +30,11 @@ export async function loadState(): Promise<{
   const err = e1 || e2 || e3 || e4 || e5;
   if (err) throw err;
 
-  const isAdmin = role === "admin";
-
   const roster: Resource[] = (resources || []).map((r) => ({
     id: r.id,
     name: r.name,
     trade: r.trade,
-    rate: isAdmin ? Number(r.rate) : 0,
+    rate: canSeeFinance ? Number(r.rate) : 0,
     unit: r.unit,
   }));
 
@@ -42,13 +42,13 @@ export async function loadState(): Promise<{
     id: p.id,
     name: p.name,
     color: p.color,
-    revenue: isAdmin ? Number(p.revenue) || 0 : 0,
+    revenue: canSeeFinance ? Number(p.revenue) || 0 : 0,
     materials: [],
     areas: {},
   }));
   const byId: Record<string, Project> = {};
   projects.forEach((p) => (byId[p.id] = p));
-  if (isAdmin) {
+  if (canSeeFinance) {
     (matRows || []).forEach((m) => {
       const p = byId[m.project_id];
       if (p) p.materials.push({ id: m.id, item: m.item || "", cost: Number(m.cost) || 0 });
@@ -96,7 +96,7 @@ export async function updateProjectName(id: string, name: string) {
   if (error) throw error;
 }
 export async function updateProjectRevenue(id: string, revenue: number) {
-  await requireRole("admin");
+  await requireTabAccess("pnl");
   const supa = getSupabase();
   const { error } = await supa.from("projects").update({ revenue }).eq("id", id);
   if (error) throw error;
@@ -149,19 +149,19 @@ export async function moveBooking(date: string, resourceId: string, band: Band, 
 
 /* materials — admin only (cost data, part of the P&L tab) */
 export async function insertMaterial(id: string, projectId: string) {
-  await requireRole("admin");
+  await requireTabAccess("pnl");
   const supa = getSupabase();
   const { error } = await supa.from("materials").insert({ id, project_id: projectId, item: "", cost: 0 });
   if (error) throw error;
 }
 export async function updateMaterial(id: string, patch: { item?: string; cost?: number }) {
-  await requireRole("admin");
+  await requireTabAccess("pnl");
   const supa = getSupabase();
   const { error } = await supa.from("materials").update(patch).eq("id", id);
   if (error) throw error;
 }
 export async function deleteMaterial(id: string) {
-  await requireRole("admin");
+  await requireTabAccess("pnl");
   const supa = getSupabase();
   const { error } = await supa.from("materials").delete().eq("id", id);
   if (error) throw error;
@@ -169,7 +169,7 @@ export async function deleteMaterial(id: string) {
 
 /* areas — admin only (part of the P&L tab) */
 export async function insertArea(id: string, projectId: string, resourceId: string) {
-  await requireRole("admin");
+  await requireTabAccess("pnl");
   const supa = getSupabase();
   const { error } = await supa
     .from("areas")
@@ -177,13 +177,13 @@ export async function insertArea(id: string, projectId: string, resourceId: stri
   if (error) throw error;
 }
 export async function updateArea(id: string, patch: { area_name?: string; sqft?: number }) {
-  await requireRole("admin");
+  await requireTabAccess("pnl");
   const supa = getSupabase();
   const { error } = await supa.from("areas").update(patch).eq("id", id);
   if (error) throw error;
 }
 export async function deleteArea(id: string) {
-  await requireRole("admin");
+  await requireTabAccess("pnl");
   const supa = getSupabase();
   const { error } = await supa.from("areas").delete().eq("id", id);
   if (error) throw error;
@@ -191,45 +191,45 @@ export async function deleteArea(id: string) {
 
 /* resources (roster) — admin only (names are visible elsewhere, but rate is wage data) */
 export async function insertResource(r: Resource) {
-  await requireRole("admin");
+  await requireTabAccess("roster");
   const supa = getSupabase();
   const { error } = await supa.from("resources").insert(r);
   if (error) throw error;
 }
 export async function insertResourcesBulk(rows: Resource[]) {
-  await requireRole("admin");
+  await requireTabAccess("roster");
   if (!rows.length) return;
   const supa = getSupabase();
   const { error } = await supa.from("resources").upsert(rows);
   if (error) throw error;
 }
 export async function updateResource(id: string, patch: Partial<Resource>) {
-  await requireRole("admin");
+  await requireTabAccess("roster");
   const supa = getSupabase();
   const { error } = await supa.from("resources").update(patch).eq("id", id);
   if (error) throw error;
 }
 export async function deleteResource(id: string) {
-  await requireRole("admin");
+  await requireTabAccess("roster");
   const supa = getSupabase();
   const { error } = await supa.from("resources").delete().eq("id", id);
   if (error) throw error;
 }
 export async function clearAllResources() {
-  await requireRole("admin");
+  await requireTabAccess("roster");
   const supa = getSupabase();
   const { error } = await supa.from("resources").delete().neq("id", "");
   if (error) throw error;
 }
 export async function getRosterDefaults(): Promise<Resource[]> {
-  await requireRole("admin");
+  await requireTabAccess("roster");
   const supa = getSupabase();
   const { data, error } = await supa.from("roster_defaults").select("*");
   if (error) throw error;
   return (data || []).map((r) => ({ id: r.id, name: r.name, trade: r.trade, rate: Number(r.rate), unit: r.unit }));
 }
 export async function resetRosterToDefaults(defaults: Resource[], removeIds: string[]) {
-  await requireRole("admin");
+  await requireTabAccess("roster");
   const supa = getSupabase();
   if (removeIds.length) {
     const { error } = await supa.from("resources").delete().in("id", removeIds);
@@ -309,7 +309,7 @@ export interface InvoiceRow {
   url: string;
 }
 export async function listInvoices(projectId: string): Promise<InvoiceRow[]> {
-  await requireRole("admin");
+  await requireTabAccess("pnl");
   const supa = getSupabase();
   const { data, error } = await supa
     .from("invoices")
@@ -325,7 +325,7 @@ export async function listInvoices(projectId: string): Promise<InvoiceRow[]> {
   }));
 }
 export async function uploadInvoice(projectId: string, fileName: string, contentType: string, base64Data: string) {
-  await requireRole("admin");
+  await requireTabAccess("pnl");
   const supa = getSupabase();
   const buffer = Buffer.from(base64Data, "base64");
   const path = `${projectId}/${Date.now()}_${fileName}`;
@@ -335,7 +335,7 @@ export async function uploadInvoice(projectId: string, fileName: string, content
   if (insErr) throw insErr;
 }
 export async function deleteInvoice(id: string) {
-  await requireRole("admin");
+  await requireTabAccess("pnl");
   const supa = getSupabase();
   const { data: row, error: readErr } = await supa.from("invoices").select("storage_path").eq("id", id).single();
   if (readErr) throw readErr;

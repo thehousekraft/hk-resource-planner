@@ -1,12 +1,13 @@
 import { blankProject } from "@/lib/calc";
 import { ensureDefaultProject, loadState } from "../actions";
-import { ensureProfile } from "@/lib/roles";
+import { ensureProfile, getAllowedTabs } from "@/lib/roles";
 import App from "@/components/App";
 
 export const dynamic = "force-dynamic";
 
 export default async function Page() {
   const { role, userId } = await ensureProfile();
+  const allowedTabs = await getAllowedTabs(role);
 
   let roster, projects, bookings;
   try {
@@ -32,5 +33,14 @@ export default async function Page() {
     projects = [p];
   }
 
-  return <App initialRoster={roster} initialProjects={projects} initialBookings={bookings} role={role} currentUserId={userId} />;
+  return (
+    <App
+      initialRoster={roster}
+      initialProjects={projects}
+      initialBookings={bookings}
+      role={role}
+      currentUserId={userId}
+      allowedTabs={allowedTabs}
+    />
+  );
 }
