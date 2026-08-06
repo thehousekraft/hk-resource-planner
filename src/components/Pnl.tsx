@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { AppState, AreaLine, MaterialLine } from "@/lib/types";
-import { CUR, NUM, OT_HR_FRAC, countBand, countBandLoc, isSqft, projStats, sumOtHours } from "@/lib/calc";
+import { CUR, NUM, OT_HR_FRAC, countBand, countBandLoc, datesForBand, formatDateList, isSqft, projStats, sumOtHours } from "@/lib/calc";
 import { deleteInvoice, listInvoices, uploadInvoice, type InvoiceRow } from "@/app/actions";
 
 function fileToBase64(file: File): Promise<string> {
@@ -21,7 +21,6 @@ export default function Pnl({
   state,
   onSetCurrent,
   onRename,
-  onDelete,
   onSetRevenue,
   onAddMaterial,
   onUpdateMaterial,
@@ -34,7 +33,6 @@ export default function Pnl({
   state: AppState;
   onSetCurrent: (id: string) => void;
   onRename: (id: string, name: string) => void;
-  onDelete: (id: string) => void;
   onSetRevenue: (id: string, revenue: number) => void;
   onAddMaterial: () => void;
   onUpdateMaterial: (id: string, patch: Partial<MaterialLine>) => void;
@@ -125,9 +123,6 @@ export default function Pnl({
             <span className="fldlabel">Rename</span>
             <input type="text" style={{ width: "100%" }} value={proj.name} onChange={(e) => onRename(proj.id, e.target.value)} />
           </div>
-          <button className="btn warn sm spacer" style={{ alignSelf: "flex-end" }} onClick={() => onDelete(proj.id)}>
-            Delete project
-          </button>
         </div>
       </div>
 
@@ -228,6 +223,8 @@ export default function Pnl({
                 tO += oc;
                 const site = countBandLoc(state, p.id, proj.id, "P", "site");
                 const fac = countBandLoc(state, p.id, proj.id, "P", "factory");
+                const primDates = datesForBand(state, p.id, proj.id, "P");
+                const otDates = datesForBand(state, p.id, proj.id, "O");
                 return (
                   <tr key={p.id}>
                     <td>
@@ -237,11 +234,31 @@ export default function Pnl({
                       </div>
                     </td>
                     <td style={{ textAlign: "right" }}>{CUR.format(p.rate)}</td>
-                    <td style={{ textAlign: "right" }}>{prim}</td>
+                    <td style={{ textAlign: "right" }}>
+                      {prim}
+                      {primDates.length > 0 && (
+                        <div
+                          className="muted"
+                          style={{ fontSize: 9.5, lineHeight: 1.3, marginTop: 2, maxWidth: 150, marginLeft: "auto" }}
+                        >
+                          {formatDateList(primDates)}
+                        </div>
+                      )}
+                    </td>
                     <td style={{ textAlign: "right", fontSize: 12 }}>
                       {site}/{fac}
                     </td>
-                    <td style={{ textAlign: "right" }}>{oth || ""}</td>
+                    <td style={{ textAlign: "right" }}>
+                      {oth || ""}
+                      {otDates.length > 0 && (
+                        <div
+                          className="muted"
+                          style={{ fontSize: 9.5, lineHeight: 1.3, marginTop: 2, maxWidth: 150, marginLeft: "auto" }}
+                        >
+                          {formatDateList(otDates)}
+                        </div>
+                      )}
+                    </td>
                     <td style={{ textAlign: "right" }}>{CUR.format(pc)}</td>
                     <td style={{ textAlign: "right" }}>{CUR.format(oc)}</td>
                     <td style={{ textAlign: "right", fontWeight: 560 }}>{CUR.format(pc + oc)}</td>

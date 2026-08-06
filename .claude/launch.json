@@ -4,7 +4,7 @@
     {
       "name": "hk-resource-planner-dev",
       "runtimeExecutable": "C:\\Windows\\System32\\cmd.exe",
-      "runtimeArgs": ["/c", "set PATH=C:\\Program Files\\nodejs;%PATH%&& npm run dev"],
+      "runtimeArgs": ["/c", "set PATH=C:\\Program Files\\nodejs;%PATH%&& set NODE_OPTIONS=--use-system-ca&& npm run dev"],
       "port": 3000,
       "autoPort": true
     }

@@ -72,6 +72,22 @@ export function otHoursDay(state: AppState, date: string, resId: string) {
 export function hasPrimaryDay(state: AppState, date: string, resId: string) {
   return !!state.bookings[bkey(date, resId, "P")];
 }
+export function datesForBand(state: AppState, resId: string, projId: string, band: Band) {
+  const suf = "|" + resId + "|" + band;
+  const dates: string[] = [];
+  for (const k in state.bookings) {
+    if (k.endsWith(suf) && state.bookings[k].proj === projId) dates.push(k.split("|")[0]);
+  }
+  return dates.sort();
+}
+export function formatDateList(dates: string[]) {
+  return dates
+    .map((d) => {
+      const dt = new Date(d + "T00:00:00");
+      return dt.getDate() + " " + dt.toLocaleDateString("en-US", { month: "short" });
+    })
+    .join(", ");
+}
 
 export interface ProjStats {
   prim: number;

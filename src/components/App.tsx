@@ -454,7 +454,6 @@ export default function App({
             state={state}
             onSetCurrent={setCurrent}
             onRename={renameProject}
-            onDelete={deleteProject}
             onSetRevenue={setRevenue}
             onAddMaterial={addMaterial}
             onUpdateMaterial={updateMaterial}
@@ -502,7 +501,7 @@ export default function App({
 
       {isAdmin && (
         <section className={"panel" + (activeTab === "users" ? " active" : "")}>
-          <Users currentUserId={currentUserId} />
+          <Users currentUserId={currentUserId} projects={projects} onDeleteProject={deleteProject} />
         </section>
       )}
     </div>

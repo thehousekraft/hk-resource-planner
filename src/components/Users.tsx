@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import type { Role } from "@/lib/roleTypes";
 import { COMPANY_DOMAIN } from "@/lib/roleTypes";
 import { CONFIGURABLE_TABS, type ConfigurableRole, type TabKey } from "@/lib/tabs";
+import type { Project } from "@/lib/types";
 import {
   getRolePermissionsMatrix,
   inviteUser,
@@ -19,7 +20,15 @@ import {
 const ROLES: Role[] = ["admin", "editor", "viewer"];
 const CONFIGURABLE_ROLES: ConfigurableRole[] = ["editor", "viewer"];
 
-export default function Users({ currentUserId }: { currentUserId: string }) {
+export default function Users({
+  currentUserId,
+  projects,
+  onDeleteProject,
+}: {
+  currentUserId: string;
+  projects: Project[];
+  onDeleteProject: (id: string) => void;
+}) {
   const [users, setUsers] = useState<UserRow[]>([]);
   const [invites, setInvites] = useState<PendingInviteRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -30,6 +39,8 @@ export default function Users({ currentUserId }: { currentUserId: string }) {
   const [permissions, setPermissions] = useState<Record<ConfigurableRole, TabKey[]>>({ editor: [], viewer: [] });
   const [permsLoading, setPermsLoading] = useState(true);
   const [savingPerms, setSavingPerms] = useState(false);
+
+  const [deleteProjId, setDeleteProjId] = useState(projects[0]?.id || "");
 
   async function refresh() {
     setLoading(true);
@@ -100,6 +111,11 @@ export default function Users({ currentUserId }: { currentUserId: string }) {
     } catch (e) {
       alert("Could not revoke: " + (e instanceof Error ? e.message : String(e)));
     }
+  }
+
+  function handleDeleteProject() {
+    if (!deleteProjId) return;
+    onDeleteProject(deleteProjId);
   }
 
   function toggleTab(r: ConfigurableRole, tab: TabKey) {
@@ -303,6 +319,23 @@ export default function Users({ currentUserId }: { currentUserId: string }) {
             <button className="btn primary sm" style={{ marginTop: 14 }} onClick={handleSavePermissions} disabled={savingPerms}>
               {savingPerms ? "Saving…" : "Save changes"}
             </button>
+
+            <div style={{ marginTop: 24, paddingTop: 16, borderTop: "1px solid var(--line)" }}>
+              <h3 style={{ fontSize: 13.5, marginBottom: 4 }}>Delete a project</h3>
+              <div className="sub">Admin only. This permanently removes the project and frees its bookings.</div>
+              <div className="row" style={{ marginTop: 8 }}>
+                <select value={deleteProjId} onChange={(e) => setDeleteProjId(e.target.value)}>
+                  {projects.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
+                </select>
+                <button className="btn warn sm" onClick={handleDeleteProject} disabled={!deleteProjId}>
+                  Delete project
+                </button>
+              </div>
+            </div>
           </>
         )}
       </div>
