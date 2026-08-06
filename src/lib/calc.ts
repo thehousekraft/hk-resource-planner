@@ -119,6 +119,12 @@ export function projStats(state: AppState, proj: Project): ProjStats {
   return { prim, ot, sq, mat, cost, rev, profit, margin };
 }
 
+/** "Today" in India Standard Time, regardless of the server's or browser's own timezone —
+ *  this app is used exclusively by an India-based team. */
+export function todayStr() {
+  return new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+}
+
 export function monthLabel(mo: string) {
   return mo ? new Date(mo + "-01").toLocaleDateString("en-US", { month: "long", year: "numeric" }) : "—";
 }

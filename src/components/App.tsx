@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { UserButton } from "@clerk/nextjs";
 import type { AreaLine, BookingsMap, MaterialLine, Project, Resource } from "@/lib/types";
 import type { Role } from "@/lib/roles";
-import type { TabKey } from "@/lib/tabs";
+import { ALL_TAB_KEYS, TAB_LABELS, type TabKey } from "@/lib/tabs";
 import { blankProject } from "@/lib/calc";
 import * as actions from "@/app/actions";
 import Planner from "@/components/Planner";
@@ -50,9 +50,8 @@ export default function App({
   const [month, setMonth] = useState<string>(() => new Date().toISOString().slice(0, 7));
   const [current, setCurrent] = useState<string>(initialProjects[0]?.id ?? "");
   const [activeTab, setActiveTab] = useState<Tab>(() => {
-    const order: Tab[] = ["plan", "pnl", "dash", "bench", "daily", "roster", "users"];
     const canSeeAtMount = (tab: Tab) => role === "admin" || (tab !== "users" && allowedTabs.includes(tab));
-    return order.find(canSeeAtMount) ?? "plan";
+    return ALL_TAB_KEYS.find(canSeeAtMount) ?? "plan";
   });
   const [saved, setSaved] = useState(false);
   const [selection, setSelection] = useState<Set<string>>(new Set());
@@ -405,21 +404,11 @@ export default function App({
       </header>
 
       <div className="tabs">
-        {([
-          ["plan", "Calendar planner"],
-          ["pnl", "Activity/Scope P&L"],
-          ["dash", "Portfolio dashboard"],
-          ["bench", "Bench & utilisation"],
-          ["daily", "Daily allocation (WhatsApp)"],
-          ["roster", "Manage resources"],
-          ["users", "Manage users"],
-        ] as [Tab, string][])
-          .filter(([id]) => canSee(id))
-          .map(([id, label]) => (
-            <button key={id} className={"tab" + (activeTab === id ? " active" : "")} onClick={() => setActiveTab(id)}>
-              {label}
-            </button>
-          ))}
+        {ALL_TAB_KEYS.filter(canSee).map((id) => (
+          <button key={id} className={"tab" + (activeTab === id ? " active" : "")} onClick={() => setActiveTab(id)}>
+            {TAB_LABELS[id]}
+          </button>
+        ))}
       </div>
 
       {canSee("plan") && (
@@ -430,6 +419,7 @@ export default function App({
             setActiveLoc={setActiveLoc}
             selection={selection}
             readOnly={isViewer}
+            isAdmin={isAdmin}
             renamingProjectId={renamingProjectId}
             onSetCurrent={setCurrent}
             onAddProject={addProject}
@@ -452,6 +442,7 @@ export default function App({
         <section className={"panel" + (activeTab === "pnl" ? " active" : "")}>
           <Pnl
             state={state}
+            isAdmin={isAdmin}
             onSetCurrent={setCurrent}
             onRename={renameProject}
             onSetRevenue={setRevenue}

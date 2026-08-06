@@ -3,11 +3,9 @@
 import { Fragment, useMemo, useRef, useState } from "react";
 import type { AppState, Band, Loc } from "@/lib/types";
 import { bkey } from "@/lib/types";
-import { TRADE_GROUPS, daysOfMonth, groupFor, hasPrimaryDay, isSqft } from "@/lib/calc";
+import { TRADE_GROUPS, daysOfMonth, groupFor, hasPrimaryDay, isSqft, todayStr } from "@/lib/calc";
 
 const ALL_TRADES = "All";
-
-const todayStr = new Date().toISOString().slice(0, 10);
 
 export default function Planner({
   state,
@@ -15,6 +13,7 @@ export default function Planner({
   setActiveLoc,
   selection,
   readOnly,
+  isAdmin,
   renamingProjectId,
   onSetCurrent,
   onAddProject,
@@ -32,6 +31,7 @@ export default function Planner({
   setActiveLoc: (l: Loc) => void;
   selection: Set<string>;
   readOnly: boolean;
+  isAdmin: boolean;
   renamingProjectId: string | null;
   onSetCurrent: (id: string) => void;
   onAddProject: () => void;
@@ -46,6 +46,7 @@ export default function Planner({
 }) {
   const { month, roster, projects, current, bookings } = state;
   const days = daysOfMonth(month);
+  const today = todayStr();
   const dragging = useRef(false);
   const dragMode = useRef<"add" | "remove">("add");
   const [showMove, setShowMove] = useState(false);
@@ -64,6 +65,11 @@ export default function Planner({
     return projects.find((p) => p.id === id)?.color || "#999";
   }
 
+  /* Past-dated bookings can still be created/extended; removing one needs admin. */
+  function isRemovalLocked(date: string) {
+    return !isAdmin && date < today;
+  }
+
   function primaryMouseDown(date: string, resId: string, shiftKey: boolean) {
     if (readOnly) return;
     const key = bkey(date, resId, "P");
@@ -78,8 +84,11 @@ export default function Planner({
     applyPrimary(date, resId);
   }
   function applyPrimary(date: string, resId: string) {
-    if (dragMode.current === "add") onSetPrimary(date, resId);
-    else onClearPrimary(date, resId);
+    if (dragMode.current === "add") {
+      onSetPrimary(date, resId);
+    } else if (!isRemovalLocked(date)) {
+      onClearPrimary(date, resId);
+    }
   }
   function primaryMouseEnter(date: string, resId: string) {
     if (dragging.current) applyPrimary(date, resId);
@@ -94,6 +103,11 @@ export default function Planner({
       return;
     }
     if (b && b.hrs && b.proj !== current) return;
+    const willRemove = b && b.hrs === 5; // next cycle step wraps 5 -> 0, deleting the OT booking
+    if (willRemove && isRemovalLocked(date)) {
+      alert("Removing a past-dated OT allocation needs an admin.");
+      return;
+    }
     onCycleOt(date, resId);
   }
 
@@ -218,13 +232,14 @@ export default function Planner({
                 const b = bookings[key];
                 let cls = "cell";
                 if (d.dow === 0 || d.dow === 6) cls += " wknd";
-                if (d.date === todayStr) cls += " today";
+                if (d.date === today) cls += " today";
                 let style: React.CSSProperties = {};
                 if (b) {
                   if (b.proj === current) {
                     cls += " mine";
                     mine++;
                     if (selection.has(key)) cls += " sel";
+                    if (isRemovalLocked(d.date)) cls += " locked";
                   } else cls += " other";
                   if (b.loc === "factory") cls += " fac";
                   style = { "--_pc": projColor(b.proj) } as React.CSSProperties;
@@ -247,7 +262,7 @@ export default function Planner({
                 const b = bookings[key];
                 let cls = "cell otcell";
                 if (d.dow === 0 || d.dow === 6) cls += " wknd";
-                if (d.date === todayStr) cls += " today";
+                if (d.date === today) cls += " today";
                 const primHere = hasPrimaryDay(state, d.date, p.id);
                 if (!primHere) cls += " noprim";
                 let style: React.CSSProperties = {};

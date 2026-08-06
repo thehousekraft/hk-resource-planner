@@ -6,14 +6,18 @@ import { COMPANY_DOMAIN } from "@/lib/roleTypes";
 import { CONFIGURABLE_TABS, type ConfigurableRole, type TabKey } from "@/lib/tabs";
 import type { Project } from "@/lib/types";
 import {
+  approveReuploadRequest,
   getRolePermissionsMatrix,
   inviteUser,
   listPendingInvitations,
+  listPendingReuploadRequests,
   listUsers,
+  rejectReuploadRequest,
   revokeInvitation,
   updateRolePermissions,
   updateUserRole,
   type PendingInviteRow,
+  type ReuploadRequestRow,
   type UserRow,
 } from "@/app/userActions";
 
@@ -42,6 +46,10 @@ export default function Users({
 
   const [deleteProjId, setDeleteProjId] = useState(projects[0]?.id || "");
 
+  const [reuploadRequests, setReuploadRequests] = useState<ReuploadRequestRow[]>([]);
+  const [reqLoading, setReqLoading] = useState(true);
+  const [reviewingId, setReviewingId] = useState<string | null>(null);
+
   async function refresh() {
     setLoading(true);
     try {
@@ -66,10 +74,35 @@ export default function Users({
     }
   }
 
+  async function refreshReuploadRequests() {
+    setReqLoading(true);
+    try {
+      setReuploadRequests(await listPendingReuploadRequests());
+    } catch (e) {
+      alert("Could not load re-upload requests: " + (e instanceof Error ? e.message : String(e)));
+    } finally {
+      setReqLoading(false);
+    }
+  }
+
   useEffect(() => {
     refresh();
     refreshPermissions();
+    refreshReuploadRequests();
   }, []);
+
+  async function handleReviewReupload(id: string, approve: boolean) {
+    setReviewingId(id);
+    try {
+      if (approve) await approveReuploadRequest(id);
+      else await rejectReuploadRequest(id);
+      setReuploadRequests((prev) => prev.filter((r) => r.id !== id));
+    } catch (e) {
+      alert("Could not update request: " + (e instanceof Error ? e.message : String(e)));
+    } finally {
+      setReviewingId(null);
+    }
+  }
 
   async function handleInvite() {
     const trimmed = email.trim().toLowerCase();
@@ -337,6 +370,57 @@ export default function Users({
               </div>
             </div>
           </>
+        )}
+      </div>
+
+      <div className="card">
+        <h2>Scope drawing re-upload requests</h2>
+        <div className="sub">
+          Non-admins get one scope-drawing upload per project. Approve a request here to unlock exactly one more
+          upload for that project.
+        </div>
+        {reqLoading ? (
+          <div className="empty">Loading…</div>
+        ) : !reuploadRequests.length ? (
+          <div className="empty">No pending requests.</div>
+        ) : (
+          <table className="rtable">
+            <thead>
+              <tr>
+                <th>Project</th>
+                <th>Requested by</th>
+                <th>Justification</th>
+                <th className="narrow">Requested</th>
+                <th style={{ width: 140 }} />
+              </tr>
+            </thead>
+            <tbody>
+              {reuploadRequests.map((r) => (
+                <tr key={r.id}>
+                  <td>{r.projectName}</td>
+                  <td>{r.requestedByEmail}</td>
+                  <td style={{ fontSize: 12.5 }}>{r.justification}</td>
+                  <td className="narrow muted" style={{ fontSize: 12 }}>
+                    {new Date(r.createdAt).toLocaleDateString()}
+                  </td>
+                  <td>
+                    <div className="row" style={{ gap: 6 }}>
+                      <button
+                        className="btn primary sm"
+                        onClick={() => handleReviewReupload(r.id, true)}
+                        disabled={reviewingId === r.id}
+                      >
+                        Approve
+                      </button>
+                      <button className="btn sm" onClick={() => handleReviewReupload(r.id, false)} disabled={reviewingId === r.id}>
+                        Reject
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         )}
       </div>
     </>

@@ -104,3 +104,62 @@ export async function updateRolePermissions(role: ConfigurableRole, allowedTabs:
     .upsert({ role, allowed_tabs: allowedTabs.filter((t) => t !== "users") }, { onConflict: "role" });
   if (error) throw error;
 }
+
+/* scope-drawing re-upload requests — admin reviews and approves/rejects here. */
+export interface ReuploadRequestRow {
+  id: string;
+  projectId: string;
+  projectName: string;
+  requestedByEmail: string;
+  justification: string;
+  createdAt: string;
+}
+
+export async function listPendingReuploadRequests(): Promise<ReuploadRequestRow[]> {
+  await requireRole("admin");
+  const supa = getSupabase();
+  const { data, error } = await supa
+    .from("scope_reupload_requests")
+    .select("id, project_id, justification, created_at, requested_by, projects(name)")
+    .eq("status", "pending")
+    .order("created_at", { ascending: true });
+  if (error) throw error;
+
+  const requestedIds = [...new Set((data || []).map((r) => r.requested_by).filter(Boolean))];
+  const emailByUserId: Record<string, string> = {};
+  if (requestedIds.length) {
+    const { data: profs } = await supa.from("profiles").select("clerk_user_id,email").in("clerk_user_id", requestedIds);
+    (profs || []).forEach((p) => (emailByUserId[p.clerk_user_id] = p.email || ""));
+  }
+
+  return (data || []).map((r) => ({
+    id: r.id,
+    projectId: r.project_id,
+    projectName: (r.projects as { name?: string } | null)?.name || r.project_id,
+    requestedByEmail: emailByUserId[r.requested_by as string] || "—",
+    justification: r.justification,
+    createdAt: r.created_at,
+  }));
+}
+
+export async function approveReuploadRequest(id: string) {
+  await requireRole("admin");
+  const { userId } = await auth();
+  const supa = getSupabase();
+  const { error } = await supa
+    .from("scope_reupload_requests")
+    .update({ status: "approved", reviewed_by: userId, reviewed_at: new Date().toISOString() })
+    .eq("id", id);
+  if (error) throw error;
+}
+
+export async function rejectReuploadRequest(id: string) {
+  await requireRole("admin");
+  const { userId } = await auth();
+  const supa = getSupabase();
+  const { error } = await supa
+    .from("scope_reupload_requests")
+    .update({ status: "rejected", reviewed_by: userId, reviewed_at: new Date().toISOString() })
+    .eq("id", id);
+  if (error) throw error;
+}

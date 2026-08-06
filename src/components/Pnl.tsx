@@ -1,24 +1,26 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { AppState, AreaLine, MaterialLine } from "@/lib/types";
 import { CUR, NUM, OT_HR_FRAC, countBand, countBandLoc, datesForBand, formatDateList, isSqft, projStats, sumOtHours } from "@/lib/calc";
-import { deleteInvoice, listInvoices, uploadInvoice, type InvoiceRow } from "@/app/actions";
+import {
+  deleteInvoice,
+  getScopeDrawing,
+  getScopeReuploadStatus,
+  listInvoices,
+  requestScopeReupload,
+  uploadInvoice,
+  uploadScopeDrawing,
+  type InvoiceRow,
+  type ReuploadLockStatus,
+  type ScopeDrawingRow,
+} from "@/app/actions";
 
-function fileToBase64(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const result = reader.result as string;
-      resolve(result.split(",")[1] || "");
-    };
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
-}
+const MAX_UPLOAD_BYTES = 7 * 1024 * 1024;
 
 export default function Pnl({
   state,
+  isAdmin,
   onSetCurrent,
   onRename,
   onSetRevenue,
@@ -31,6 +33,7 @@ export default function Pnl({
   onDeleteArea,
 }: {
   state: AppState;
+  isAdmin: boolean;
   onSetCurrent: (id: string) => void;
   onRename: (id: string, name: string) => void;
   onSetRevenue: (id: string, revenue: number) => void;
@@ -56,13 +59,83 @@ export default function Pnl({
       .catch((err) => console.error(err));
   }, [proj?.id]);
 
+  const scopeFileInputRef = useRef<HTMLInputElement>(null);
+  const [scopeDrawing, setScopeDrawing] = useState<ScopeDrawingRow | null>(null);
+  const [reuploadStatus, setReuploadStatus] = useState<ReuploadLockStatus>("none");
+  const [pendingScopeFile, setPendingScopeFile] = useState<File | null>(null);
+  const [scopeUploading, setScopeUploading] = useState(false);
+  const [showReuploadModal, setShowReuploadModal] = useState(false);
+  const [reuploadJustification, setReuploadJustification] = useState("");
+  const [requestingReupload, setRequestingReupload] = useState(false);
+
+  useEffect(() => {
+    setPendingScopeFile(null);
+    if (!proj) return;
+    Promise.all([getScopeDrawing(proj.id), getScopeReuploadStatus(proj.id)])
+      .then(([d, s]) => {
+        setScopeDrawing(d);
+        setReuploadStatus(s);
+      })
+      .catch((err) => console.error(err));
+  }, [proj?.id]);
+
+  function handleScopeFilePicked(e: React.ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0];
+    if (f) {
+      if (f.size > MAX_UPLOAD_BYTES) {
+        alert("File is too large. The upload limit is 7MB.");
+      } else {
+        setPendingScopeFile(f);
+      }
+    }
+    e.target.value = "";
+  }
+  async function confirmScopeUpload() {
+    if (!pendingScopeFile || !proj) return;
+    setScopeUploading(true);
+    try {
+      const fd = new FormData();
+      fd.set("projectId", proj.id);
+      fd.set("file", pendingScopeFile);
+      await uploadScopeDrawing(fd);
+      setScopeDrawing(await getScopeDrawing(proj.id));
+      setReuploadStatus(await getScopeReuploadStatus(proj.id));
+      setPendingScopeFile(null);
+    } catch (err) {
+      alert("Upload failed: " + (err instanceof Error ? err.message : String(err)));
+    } finally {
+      setScopeUploading(false);
+    }
+  }
+  async function submitReuploadRequest() {
+    if (!proj) return;
+    setRequestingReupload(true);
+    try {
+      await requestScopeReupload(proj.id, reuploadJustification);
+      setReuploadStatus(await getScopeReuploadStatus(proj.id));
+      setShowReuploadModal(false);
+      setReuploadJustification("");
+    } catch (err) {
+      alert("Could not submit request: " + (err instanceof Error ? err.message : String(err)));
+    } finally {
+      setRequestingReupload(false);
+    }
+  }
+
   async function handleInvoiceFile(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0];
     if (!f || !proj) return;
+    if (f.size > MAX_UPLOAD_BYTES) {
+      alert("File is too large. The upload limit is 7MB.");
+      e.target.value = "";
+      return;
+    }
     setUploading(true);
     try {
-      const base64 = await fileToBase64(f);
-      await uploadInvoice(proj.id, f.name, f.type || "application/octet-stream", base64);
+      const fd = new FormData();
+      fd.set("projectId", proj.id);
+      fd.set("file", f);
+      await uploadInvoice(fd);
       setInvoices(await listInvoices(proj.id));
     } catch (err) {
       alert("Upload failed: " + (err instanceof Error ? err.message : String(err)));
@@ -199,6 +272,67 @@ export default function Pnl({
           Day-rate labour <span className="muted" style={{ fontWeight: 400, fontSize: 13 }}>(all months)</span>
         </h2>
         <div className="sub">Primary = mandays × rate. OT = OT-days × 3/8 × rate. Site/Factory split shown per person.</div>
+
+        <div style={{ margin: "12px 0 18px", paddingBottom: 16, borderBottom: "1px solid var(--line)" }}>
+          <div className="fldlabel" style={{ marginBottom: 6 }}>
+            Scope drawing (for allocation)
+          </div>
+          {scopeDrawing && (
+            <div className="row" style={{ fontSize: 12.5, marginBottom: 8 }}>
+              <a href={scopeDrawing.url} target="_blank" rel="noopener noreferrer">
+                {scopeDrawing.fileName}
+              </a>
+              <span className="muted">uploaded {new Date(scopeDrawing.uploadedAt).toLocaleDateString()}</span>
+            </div>
+          )}
+          <input
+            ref={scopeFileInputRef}
+            type="file"
+            style={{ display: "none" }}
+            accept=".pdf,.png,.jpg,.jpeg,.dwg,.dxf"
+            onChange={handleScopeFilePicked}
+          />
+          {!scopeDrawing && (
+            <button className="btn sm" onClick={() => scopeFileInputRef.current?.click()} disabled={scopeUploading}>
+              Upload scope drawing
+            </button>
+          )}
+          {scopeDrawing && isAdmin && (
+            <button className="btn sm" onClick={() => scopeFileInputRef.current?.click()} disabled={scopeUploading}>
+              Replace scope drawing
+            </button>
+          )}
+          {scopeDrawing && !isAdmin && reuploadStatus === "approved" && (
+            <button className="btn sm" onClick={() => scopeFileInputRef.current?.click()} disabled={scopeUploading}>
+              Upload approved drawing
+            </button>
+          )}
+          {scopeDrawing && !isAdmin && reuploadStatus === "none" && (
+            <button className="btn sm" onClick={() => setShowReuploadModal(true)}>
+              Locked — request re-upload
+            </button>
+          )}
+          {scopeDrawing && !isAdmin && reuploadStatus === "pending" && (
+            <span className="muted" style={{ fontSize: 12.5 }}>
+              Re-upload request pending admin approval.
+            </span>
+          )}
+          {pendingScopeFile && (
+            <div className="row" style={{ marginTop: 10, fontSize: 12.5, background: "var(--wknd)", padding: "8px 10px", borderRadius: 6 }}>
+              <span>
+                Ready to upload <b>{pendingScopeFile.name}</b>
+                {scopeDrawing ? " — this replaces the current drawing." : "."}
+              </span>
+              <button className="btn sm" onClick={() => setPendingScopeFile(null)}>
+                Cancel
+              </button>
+              <button className="btn primary sm" onClick={confirmScopeUpload} disabled={scopeUploading}>
+                {scopeUploading ? "Uploading…" : "Confirm upload"}
+              </button>
+            </div>
+          )}
+        </div>
+
         {!dayRows.length ? (
           <div className="empty">No day-rate resources booked. Book days on the planner.</div>
         ) : (
@@ -385,6 +519,37 @@ export default function Pnl({
           <div className="row">
             <button className="btn" onClick={() => setShowInvoiceModal(false)}>
               Close
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div className={"modal-bg" + (showReuploadModal ? " show" : "")}>
+        <div className="modal">
+          <h3>Request scope drawing re-upload</h3>
+          <p>
+            Explain why &quot;{proj.name}&quot;&apos;s scope drawing needs to be replaced. An admin must approve
+            before the upload unlocks.
+          </p>
+          <textarea
+            rows={4}
+            style={{ width: "100%" }}
+            value={reuploadJustification}
+            onChange={(e) => setReuploadJustification(e.target.value)}
+            placeholder="e.g. Wrong revision uploaded, client sent an updated drawing on 12 Aug"
+          />
+          <div className="row">
+            <button
+              className="btn"
+              onClick={() => {
+                setShowReuploadModal(false);
+                setReuploadJustification("");
+              }}
+            >
+              Cancel
+            </button>
+            <button className="btn primary" onClick={submitReuploadRequest} disabled={requestingReupload}>
+              {requestingReupload ? "Submitting…" : "Submit request"}
             </button>
           </div>
         </div>

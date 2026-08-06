@@ -7,7 +7,7 @@ export const CONFIGURABLE_TABS: { key: Exclude<TabKey, "users">; label: string }
   { key: "pnl", label: "Activity/Scope P&L" },
   { key: "dash", label: "Portfolio dashboard" },
   { key: "bench", label: "Bench & utilisation" },
-  { key: "daily", label: "Daily allocation (WhatsApp)" },
+  { key: "daily", label: "Allocation Trade-Wise - Full project allocation" },
   { key: "roster", label: "Manage resources" },
 ];
 
@@ -16,7 +16,7 @@ export const TAB_LABELS: Record<TabKey, string> = {
   pnl: "Activity/Scope P&L",
   dash: "Portfolio dashboard",
   bench: "Bench & utilisation",
-  daily: "Daily allocation (WhatsApp)",
+  daily: "Allocation Trade-Wise - Full project allocation",
   roster: "Manage resources",
   users: "Manage users",
 };

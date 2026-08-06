@@ -1,9 +1,24 @@
 "use server";
 
+import { auth } from "@clerk/nextjs/server";
 import { getSupabase } from "@/lib/supabase";
 import { getAllowedTabs, getRole, requireRole, requireTabAccess } from "@/lib/roles";
 import type { AppState, Band, Loc, Project, Resource } from "@/lib/types";
 import { bkey } from "@/lib/types";
+import { todayStr } from "@/lib/calc";
+
+function assertNotPastForNonAdmin(role: string, date: string) {
+  if (role !== "admin" && date < todayStr()) {
+    throw new Error("Removing a past-dated allocation is locked. Ask an admin to make this change.");
+  }
+}
+
+const MAX_UPLOAD_BYTES = 7 * 1024 * 1024;
+function assertWithinUploadLimit(buffer: Buffer) {
+  if (buffer.length > MAX_UPLOAD_BYTES) {
+    throw new Error("File is too large. The upload limit is 7MB.");
+  }
+}
 
 export async function loadState(): Promise<{
   roster: Resource[];
@@ -125,7 +140,8 @@ export async function upsertBooking(
   if (error) throw error;
 }
 export async function deleteBooking(date: string, resourceId: string, band: Band) {
-  await requireRole("admin", "editor");
+  const role = await requireRole("admin", "editor");
+  assertNotPastForNonAdmin(role, date);
   const supa = getSupabase();
   const { error } = await supa
     .from("bookings")
@@ -324,14 +340,21 @@ export async function listInvoices(projectId: string): Promise<InvoiceRow[]> {
     url: supa.storage.from("invoices").getPublicUrl(r.storage_path).data.publicUrl,
   }));
 }
-export async function uploadInvoice(projectId: string, fileName: string, contentType: string, base64Data: string) {
+export async function uploadInvoice(formData: FormData) {
   await requireTabAccess("pnl");
+  const projectId = formData.get("projectId") as string;
+  const file = formData.get("file") as File | null;
+  if (!projectId || !file) throw new Error("Missing file or project.");
   const supa = getSupabase();
-  const buffer = Buffer.from(base64Data, "base64");
-  const path = `${projectId}/${Date.now()}_${fileName}`;
-  const { error: upErr } = await supa.storage.from("invoices").upload(path, buffer, { contentType });
+  const buffer = Buffer.from(await file.arrayBuffer());
+  assertWithinUploadLimit(buffer);
+  const path = `${projectId}/${Date.now()}_${file.name}`;
+  const { error: upErr } = await supa
+    .storage
+    .from("invoices")
+    .upload(path, buffer, { contentType: file.type || "application/octet-stream" });
   if (upErr) throw upErr;
-  const { error: insErr } = await supa.from("invoices").insert({ project_id: projectId, file_name: fileName, storage_path: path });
+  const { error: insErr } = await supa.from("invoices").insert({ project_id: projectId, file_name: file.name, storage_path: path });
   if (insErr) throw insErr;
 }
 export async function deleteInvoice(id: string) {
@@ -341,5 +364,113 @@ export async function deleteInvoice(id: string) {
   if (readErr) throw readErr;
   await supa.storage.from("invoices").remove([row.storage_path]);
   const { error } = await supa.from("invoices").delete().eq("id", id);
+  if (error) throw error;
+}
+
+/* scope drawings — one per project, part of the P&L tab's Day-rate labour card.
+   Admin can upload/replace anytime. Everyone else gets exactly one upload; after
+   that the slot is locked until an admin approves a re-upload request. */
+export interface ScopeDrawingRow {
+  fileName: string;
+  url: string;
+  uploadedAt: string;
+}
+export type ReuploadLockStatus = "none" | "pending" | "approved";
+
+export async function getScopeDrawing(projectId: string): Promise<ScopeDrawingRow | null> {
+  await requireTabAccess("pnl");
+  const supa = getSupabase();
+  const { data, error } = await supa.from("scope_drawings").select("*").eq("project_id", projectId).maybeSingle();
+  if (error) throw error;
+  if (!data) return null;
+  return {
+    fileName: data.file_name,
+    uploadedAt: data.uploaded_at,
+    url: supa.storage.from("scope-drawings").getPublicUrl(data.storage_path).data.publicUrl,
+  };
+}
+
+export async function getScopeReuploadStatus(projectId: string): Promise<ReuploadLockStatus> {
+  await requireTabAccess("pnl");
+  const supa = getSupabase();
+  const { data, error } = await supa
+    .from("scope_reupload_requests")
+    .select("status")
+    .eq("project_id", projectId)
+    .in("status", ["pending", "approved"])
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  return (data?.status as "pending" | "approved" | undefined) || "none";
+}
+
+export async function uploadScopeDrawing(formData: FormData) {
+  const role = await requireTabAccess("pnl");
+  const projectId = formData.get("projectId") as string;
+  const file = formData.get("file") as File | null;
+  if (!projectId || !file) throw new Error("Missing file or project.");
+  const supa = getSupabase();
+
+  const { data: existing, error: existErr } = await supa
+    .from("scope_drawings")
+    .select("id, storage_path")
+    .eq("project_id", projectId)
+    .maybeSingle();
+  if (existErr) throw existErr;
+
+  let approvedRequestId: string | null = null;
+  if (existing && role !== "admin") {
+    const { data: approved, error: reqErr } = await supa
+      .from("scope_reupload_requests")
+      .select("id")
+      .eq("project_id", projectId)
+      .eq("status", "approved")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (reqErr) throw reqErr;
+    if (!approved) throw new Error("A scope drawing is already uploaded. Request re-upload approval from admin first.");
+    approvedRequestId = approved.id;
+  }
+
+  const { userId } = await auth();
+  const buffer = Buffer.from(await file.arrayBuffer());
+  assertWithinUploadLimit(buffer);
+  const path = `${projectId}/${Date.now()}_${file.name}`;
+  const { error: upErr } = await supa
+    .storage
+    .from("scope-drawings")
+    .upload(path, buffer, { contentType: file.type || "application/octet-stream" });
+  if (upErr) throw upErr;
+
+  if (existing) {
+    const { error: updErr } = await supa
+      .from("scope_drawings")
+      .update({ file_name: file.name, storage_path: path, uploaded_by: userId, uploaded_at: new Date().toISOString() })
+      .eq("id", existing.id);
+    if (updErr) throw updErr;
+    await supa.storage.from("scope-drawings").remove([existing.storage_path]);
+  } else {
+    const { error: insErr } = await supa
+      .from("scope_drawings")
+      .insert({ project_id: projectId, file_name: file.name, storage_path: path, uploaded_by: userId });
+    if (insErr) throw insErr;
+  }
+
+  if (approvedRequestId) {
+    await supa.from("scope_reupload_requests").update({ status: "fulfilled" }).eq("id", approvedRequestId);
+  }
+}
+
+export async function requestScopeReupload(projectId: string, justification: string) {
+  await requireTabAccess("pnl");
+  const trimmed = justification.trim();
+  if (!trimmed) throw new Error("Please provide a justification for the re-upload.");
+  const supa = getSupabase();
+  const { userId } = await auth();
+  const { error } = await supa
+    .from("scope_reupload_requests")
+    .insert({ project_id: projectId, justification: trimmed, requested_by: userId });
   if (error) throw error;
 }
