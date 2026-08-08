@@ -4,19 +4,33 @@ import { useEffect, useRef, useState } from "react";
 import type { AppState, AreaLine, MaterialLine } from "@/lib/types";
 import { CUR, NUM, OT_HR_FRAC, countBand, countBandLoc, datesForBand, formatDateList, isSqft, projStats, sumOtHours } from "@/lib/calc";
 import {
+  createInvoiceUploadUrl,
+  createScopeUploadUrl,
   deleteInvoice,
+  finalizeInvoiceUpload,
+  finalizeScopeUpload,
   getScopeDrawing,
   getScopeReuploadStatus,
   listInvoices,
   requestScopeReupload,
-  uploadInvoice,
-  uploadScopeDrawing,
   type InvoiceRow,
   type ReuploadLockStatus,
   type ScopeDrawingRow,
 } from "@/app/actions";
 
 const MAX_UPLOAD_BYTES = 7 * 1024 * 1024;
+
+/* Uploads bytes straight from the browser to Supabase Storage using a short-lived
+   signed URL, bypassing our own server entirely — Vercel's serverless functions cap
+   request bodies at ~4.5MB regardless of app config, well under our 7MB limit. */
+async function uploadFileDirect(signedUrl: string, file: File) {
+  const res = await fetch(signedUrl, {
+    method: "PUT",
+    headers: { "Content-Type": file.type || "application/octet-stream" },
+    body: file,
+  });
+  if (!res.ok) throw new Error(`Upload to storage failed (${res.status})`);
+}
 
 export default function Pnl({
   state,
@@ -94,10 +108,9 @@ export default function Pnl({
     if (!pendingScopeFile || !proj) return;
     setScopeUploading(true);
     try {
-      const fd = new FormData();
-      fd.set("projectId", proj.id);
-      fd.set("file", pendingScopeFile);
-      await uploadScopeDrawing(fd);
+      const { signedUrl, path } = await createScopeUploadUrl(proj.id, pendingScopeFile.name, pendingScopeFile.size);
+      await uploadFileDirect(signedUrl, pendingScopeFile);
+      await finalizeScopeUpload(proj.id, path, pendingScopeFile.name);
       setScopeDrawing(await getScopeDrawing(proj.id));
       setReuploadStatus(await getScopeReuploadStatus(proj.id));
       setPendingScopeFile(null);
@@ -132,10 +145,9 @@ export default function Pnl({
     }
     setUploading(true);
     try {
-      const fd = new FormData();
-      fd.set("projectId", proj.id);
-      fd.set("file", f);
-      await uploadInvoice(fd);
+      const { signedUrl, path } = await createInvoiceUploadUrl(proj.id, f.name, f.size);
+      await uploadFileDirect(signedUrl, f);
+      await finalizeInvoiceUpload(proj.id, path, f.name);
       setInvoices(await listInvoices(proj.id));
     } catch (err) {
       alert("Upload failed: " + (err instanceof Error ? err.message : String(err)));

@@ -14,8 +14,8 @@ function assertNotPastForNonAdmin(role: string, date: string) {
 }
 
 const MAX_UPLOAD_BYTES = 7 * 1024 * 1024;
-function assertWithinUploadLimit(buffer: Buffer) {
-  if (buffer.length > MAX_UPLOAD_BYTES) {
+function assertWithinUploadLimit(sizeBytes: number) {
+  if (sizeBytes > MAX_UPLOAD_BYTES) {
     throw new Error("File is too large. The upload limit is 7MB.");
   }
 }
@@ -340,21 +340,19 @@ export async function listInvoices(projectId: string): Promise<InvoiceRow[]> {
     url: supa.storage.from("invoices").getPublicUrl(r.storage_path).data.publicUrl,
   }));
 }
-export async function uploadInvoice(formData: FormData) {
+export async function createInvoiceUploadUrl(projectId: string, fileName: string, fileSize: number) {
   await requireTabAccess("pnl");
-  const projectId = formData.get("projectId") as string;
-  const file = formData.get("file") as File | null;
-  if (!projectId || !file) throw new Error("Missing file or project.");
+  assertWithinUploadLimit(fileSize);
   const supa = getSupabase();
-  const buffer = Buffer.from(await file.arrayBuffer());
-  assertWithinUploadLimit(buffer);
-  const path = `${projectId}/${Date.now()}_${file.name}`;
-  const { error: upErr } = await supa
-    .storage
-    .from("invoices")
-    .upload(path, buffer, { contentType: file.type || "application/octet-stream" });
-  if (upErr) throw upErr;
-  const { error: insErr } = await supa.from("invoices").insert({ project_id: projectId, file_name: file.name, storage_path: path });
+  const path = `${projectId}/${Date.now()}_${fileName}`;
+  const { data, error } = await supa.storage.from("invoices").createSignedUploadUrl(path);
+  if (error) throw error;
+  return { signedUrl: data.signedUrl, path };
+}
+export async function finalizeInvoiceUpload(projectId: string, path: string, fileName: string) {
+  await requireTabAccess("pnl");
+  const supa = getSupabase();
+  const { error: insErr } = await supa.from("invoices").insert({ project_id: projectId, file_name: fileName, storage_path: path });
   if (insErr) throw insErr;
 }
 export async function deleteInvoice(id: string) {
@@ -405,13 +403,9 @@ export async function getScopeReuploadStatus(projectId: string): Promise<Reuploa
   return (data?.status as "pending" | "approved" | undefined) || "none";
 }
 
-export async function uploadScopeDrawing(formData: FormData) {
-  const role = await requireTabAccess("pnl");
-  const projectId = formData.get("projectId") as string;
-  const file = formData.get("file") as File | null;
-  if (!projectId || !file) throw new Error("Missing file or project.");
-  const supa = getSupabase();
-
+/* Resolves whether `role` may (re)upload a scope drawing for this project, and returns
+   whatever bookkeeping the eventual write will need. Throws if a non-admin is locked out. */
+async function resolveScopeUploadAuthorization(supa: ReturnType<typeof getSupabase>, projectId: string, role: string) {
   const { data: existing, error: existErr } = await supa
     .from("scope_drawings")
     .select("id, storage_path")
@@ -433,28 +427,40 @@ export async function uploadScopeDrawing(formData: FormData) {
     if (!approved) throw new Error("A scope drawing is already uploaded. Request re-upload approval from admin first.");
     approvedRequestId = approved.id;
   }
+  return { existing, approvedRequestId };
+}
 
+/* Vercel's serverless functions hard-cap request bodies at ~4.5MB regardless of any
+   Next.js config, so files anywhere near our 7MB limit must go straight from the
+   browser to Supabase Storage via a signed URL — never through our own server. */
+export async function createScopeUploadUrl(projectId: string, fileName: string, fileSize: number) {
+  const role = await requireTabAccess("pnl");
+  assertWithinUploadLimit(fileSize);
+  const supa = getSupabase();
+  await resolveScopeUploadAuthorization(supa, projectId, role);
+  const path = `${projectId}/${Date.now()}_${fileName}`;
+  const { data, error } = await supa.storage.from("scope-drawings").createSignedUploadUrl(path);
+  if (error) throw error;
+  return { signedUrl: data.signedUrl, path };
+}
+
+export async function finalizeScopeUpload(projectId: string, path: string, fileName: string) {
+  const role = await requireTabAccess("pnl");
+  const supa = getSupabase();
   const { userId } = await auth();
-  const buffer = Buffer.from(await file.arrayBuffer());
-  assertWithinUploadLimit(buffer);
-  const path = `${projectId}/${Date.now()}_${file.name}`;
-  const { error: upErr } = await supa
-    .storage
-    .from("scope-drawings")
-    .upload(path, buffer, { contentType: file.type || "application/octet-stream" });
-  if (upErr) throw upErr;
+  const { existing, approvedRequestId } = await resolveScopeUploadAuthorization(supa, projectId, role);
 
   if (existing) {
     const { error: updErr } = await supa
       .from("scope_drawings")
-      .update({ file_name: file.name, storage_path: path, uploaded_by: userId, uploaded_at: new Date().toISOString() })
+      .update({ file_name: fileName, storage_path: path, uploaded_by: userId, uploaded_at: new Date().toISOString() })
       .eq("id", existing.id);
     if (updErr) throw updErr;
     await supa.storage.from("scope-drawings").remove([existing.storage_path]);
   } else {
     const { error: insErr } = await supa
       .from("scope_drawings")
-      .insert({ project_id: projectId, file_name: file.name, storage_path: path, uploaded_by: userId });
+      .insert({ project_id: projectId, file_name: fileName, storage_path: path, uploaded_by: userId });
     if (insErr) throw insErr;
   }
 
