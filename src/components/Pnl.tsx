@@ -32,6 +32,48 @@ async function uploadFileDirect(signedUrl: string, file: File) {
   if (!res.ok) throw new Error(`Upload to storage failed (${res.status})`);
 }
 
+function isPdf(fileName: string) {
+  return fileName.toLowerCase().endsWith(".pdf");
+}
+
+function FileIcon({ fileName }: { fileName: string }) {
+  if (isPdf(fileName)) {
+    return (
+      <svg width="20" height="24" viewBox="0 0 20 24" style={{ flexShrink: 0 }}>
+        <path d="M2 1h11l5 5v16a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1z" fill="#e0483a" />
+        <path d="M13 1v5h5" fill="#b8392d" />
+        <text x="10" y="18" textAnchor="middle" fontSize="7.5" fontWeight="700" fill="#fff" fontFamily="Arial, sans-serif">
+          PDF
+        </text>
+      </svg>
+    );
+  }
+  return (
+    <svg width="20" height="24" viewBox="0 0 20 24" style={{ flexShrink: 0 }}>
+      <path
+        d="M2 1h11l5 5v16a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1z"
+        fill="var(--card)"
+        stroke="var(--line-strong)"
+      />
+      <path d="M13 1v5h5" fill="none" stroke="var(--line-strong)" />
+    </svg>
+  );
+}
+
+function OpenFileButton({ url, fileName }: { url: string; fileName: string }) {
+  return (
+    <a
+      className="btn sm"
+      href={url}
+      target="_blank"
+      rel="noopener noreferrer"
+      style={{ textDecoration: "none", display: "inline-flex", alignItems: "center" }}
+    >
+      {isPdf(fileName) ? "Open PDF" : "Open file"}
+    </a>
+  );
+}
+
 export default function Pnl({
   state,
   isAdmin,
@@ -264,11 +306,11 @@ export default function Pnl({
           {invoices.length > 0 && (
             <div style={{ marginTop: 10 }}>
               {invoices.map((inv) => (
-                <div key={inv.id} className="row" style={{ fontSize: 12.5, padding: "4px 0" }}>
-                  <a href={inv.url} target="_blank" rel="noopener noreferrer">
-                    {inv.fileName}
-                  </a>
+                <div key={inv.id} className="row" style={{ fontSize: 12.5, padding: "4px 0", alignItems: "center", gap: 8 }}>
+                  <FileIcon fileName={inv.fileName} />
+                  <span>{inv.fileName}</span>
                   <span className="muted">{new Date(inv.uploadedAt).toLocaleDateString()}</span>
+                  <OpenFileButton url={inv.url} fileName={inv.fileName} />
                   <button className="del-x" style={{ fontSize: 14 }} onClick={() => handleDeleteInvoice(inv.id)}>
                     ×
                   </button>
@@ -290,11 +332,11 @@ export default function Pnl({
             Scope drawing (for allocation)
           </div>
           {scopeDrawing && (
-            <div className="row" style={{ fontSize: 12.5, marginBottom: 8 }}>
-              <a href={scopeDrawing.url} target="_blank" rel="noopener noreferrer">
-                {scopeDrawing.fileName}
-              </a>
+            <div className="row" style={{ fontSize: 12.5, marginBottom: 8, alignItems: "center", gap: 8 }}>
+              <FileIcon fileName={scopeDrawing.fileName} />
+              <span style={{ fontWeight: 560 }}>{scopeDrawing.fileName}</span>
               <span className="muted">uploaded {new Date(scopeDrawing.uploadedAt).toLocaleDateString()}</span>
+              <OpenFileButton url={scopeDrawing.url} fileName={scopeDrawing.fileName} />
             </div>
           )}
           <input
