@@ -2,11 +2,25 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { AppState, AreaLine, MaterialLine } from "@/lib/types";
-import { CUR, NUM, OT_HR_FRAC, countBand, countBandLoc, datesForBand, formatDateList, isSqft, projStats, sumOtHours } from "@/lib/calc";
+import {
+  CUR,
+  NUM,
+  OT_HR_FRAC,
+  countBand,
+  countBandLoc,
+  datesForBand,
+  formatDateList,
+  isSqft,
+  materialCeilingRemaining,
+  projStats,
+  sumOtHours,
+  targetCostCeiling,
+} from "@/lib/calc";
 import {
   createInvoiceUploadUrl,
   createScopeUploadUrl,
   deleteInvoice,
+  deleteScopeDrawing,
   finalizeInvoiceUpload,
   finalizeScopeUpload,
   getScopeDrawing,
@@ -77,9 +91,12 @@ function OpenFileButton({ url, fileName }: { url: string; fileName: string }) {
 export default function Pnl({
   state,
   isAdmin,
+  onSelectParent,
   onSetCurrent,
   onRename,
   onSetRevenue,
+  onSetTargets,
+  onSetCustomerHoDate,
   onAddMaterial,
   onUpdateMaterial,
   onDeleteMaterial,
@@ -90,9 +107,12 @@ export default function Pnl({
 }: {
   state: AppState;
   isAdmin: boolean;
+  onSelectParent: (id: string) => void;
   onSetCurrent: (id: string) => void;
   onRename: (id: string, name: string) => void;
   onSetRevenue: (id: string, revenue: number) => void;
+  onSetTargets: (id: string, targetMarginPct: number | null, targetLabourCost: number | null) => void;
+  onSetCustomerHoDate: (id: string, date: string) => void;
   onAddMaterial: () => void;
   onUpdateMaterial: (id: string, patch: Partial<MaterialLine>) => void;
   onDeleteMaterial: (id: string) => void;
@@ -101,7 +121,9 @@ export default function Pnl({
   onUpdateArea: (resId: string, id: string, patch: Partial<AreaLine>) => void;
   onDeleteArea: (resId: string, id: string) => void;
 }) {
-  const { roster, projects, current, bookings } = state;
+  const { roster, parentProjects, projects, currentParent, current, bookings } = state;
+  const curParent = parentProjects.find((pp) => pp.id === currentParent);
+  const subProjects = projects.filter((p) => p.parentProjectId === currentParent);
   const proj = projects.find((p) => p.id === current);
 
   const [showInvoiceModal, setShowInvoiceModal] = useState(false);
@@ -162,6 +184,15 @@ export default function Pnl({
       setScopeUploading(false);
     }
   }
+  async function handleDeleteScopeDrawing() {
+    if (!proj || !confirm("Delete this scope drawing? This cannot be undone.")) return;
+    try {
+      await deleteScopeDrawing(proj.id);
+      setScopeDrawing(null);
+    } catch (err) {
+      alert("Could not delete: " + (err instanceof Error ? err.message : String(err)));
+    }
+  }
   async function submitReuploadRequest() {
     if (!proj) return;
     setRequestingReupload(true);
@@ -177,19 +208,22 @@ export default function Pnl({
     }
   }
 
-  async function handleInvoiceFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const f = e.target.files?.[0];
-    if (!f || !proj) return;
-    if (f.size > MAX_UPLOAD_BYTES) {
-      alert("File is too large. The upload limit is 7MB.");
+  async function handleInvoiceFiles(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files || []);
+    if (!files.length || !proj) return;
+    const oversized = files.find((f) => f.size > MAX_UPLOAD_BYTES);
+    if (oversized) {
+      alert(`"${oversized.name}" is too large. The upload limit is 7MB.`);
       e.target.value = "";
       return;
     }
     setUploading(true);
     try {
-      const { signedUrl, path } = await createInvoiceUploadUrl(proj.id, f.name, f.size);
-      await uploadFileDirect(signedUrl, f);
-      await finalizeInvoiceUpload(proj.id, path, f.name);
+      for (const f of files) {
+        const { signedUrl, path } = await createInvoiceUploadUrl(proj.id, f.name, f.size);
+        await uploadFileDirect(signedUrl, f);
+        await finalizeInvoiceUpload(proj.id, path, f.name);
+      }
       setInvoices(await listInvoices(proj.id));
     } catch (err) {
       alert("Upload failed: " + (err instanceof Error ? err.message : String(err)));
@@ -221,16 +255,13 @@ export default function Pnl({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [proj?.id, sqftPeople.map((p) => p.id).join(","), bookings]);
 
-  if (!proj) return null;
-  const s = projStats(state, proj);
-
-  const dayRows = roster
-    .filter((p) => !isSqft(p))
-    .map((p) => ({ p, prim: countBand(state, p.id, proj.id, "P"), oth: sumOtHours(state, p.id, proj.id) }))
-    .filter((x) => x.prim || x.oth);
-
-  let tP = 0,
-    tO = 0;
+  if (!curParent) {
+    return (
+      <div className="card">
+        <div className="empty">Create a project on the Calendar planner tab first.</div>
+      </div>
+    );
+  }
 
   return (
     <>
@@ -238,337 +269,472 @@ export default function Pnl({
         <div className="row">
           <div>
             <span className="fldlabel">Project</span>
-            <select value={current} onChange={(e) => onSetCurrent(e.target.value)}>
-              {projects.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
+            <select value={currentParent} onChange={(e) => onSelectParent(e.target.value)} style={{ minWidth: 220 }}>
+              {parentProjects.map((pp) => (
+                <option key={pp.id} value={pp.id}>
+                  {pp.name}
                 </option>
               ))}
             </select>
           </div>
           <div style={{ flex: 1, minWidth: 180 }}>
-            <span className="fldlabel">Rename</span>
-            <input type="text" style={{ width: "100%" }} value={proj.name} onChange={(e) => onRename(proj.id, e.target.value)} />
-          </div>
-        </div>
-      </div>
-
-      <div className="card">
-        <h2>Activity/Scope Price quoted</h2>
-        <div className="sub">Client-billed / quoted value for this project.</div>
-        <div className="rev-grid">
-          <label>Activity/Scope Price quoted</label>
-          <input
-            type="number"
-            min={0}
-            step={1000}
-            placeholder="0"
-            value={proj.revenue || ""}
-            onChange={(e) => onSetRevenue(proj.id, Number(e.target.value) || 0)}
-          />
-        </div>
-
-        <h2 style={{ marginTop: 22 }}>Material estimate</h2>
-        <div className="sub">Material line items for this project.</div>
-        <div className="mat-row mat-head">
-          <div>Item</div>
-          <div>Estimate cost</div>
-          <div />
-        </div>
-        {proj.materials.map((m) => (
-          <div className="mat-row" key={m.id}>
+            <span className="fldlabel">Rename project</span>
             <input
               type="text"
-              placeholder="e.g. Plywood, laminate"
-              value={m.item}
-              onChange={(e) => onUpdateMaterial(m.id, { item: e.target.value })}
+              style={{ width: "100%" }}
+              value={curParent.name}
+              onChange={(e) => onRename(curParent.id, e.target.value)}
             />
+          </div>
+          <div>
+            <span className="fldlabel">Customer HO date</span>
             <input
-              type="number"
-              placeholder="0"
-              min={0}
-              value={m.cost || ""}
-              onChange={(e) => onUpdateMaterial(m.id, { cost: Number(e.target.value) || 0 })}
+              type="date"
+              value={curParent.customerHoDate || ""}
+              onChange={(e) => onSetCustomerHoDate(curParent.id, e.target.value)}
             />
-            <button className="del-x" onClick={() => onDeleteMaterial(m.id)}>
-              ×
-            </button>
           </div>
-        ))}
-        <button className="btn sm" onClick={onAddMaterial}>
-          + Add material
-        </button>
-
-        <div style={{ marginTop: 18, paddingTop: 16, borderTop: "1px solid var(--line)" }}>
-          <button className="btn sm" onClick={() => setShowInvoiceModal(true)}>
-            Upload invoice
-          </button>
-          {invoices.length > 0 && (
-            <div style={{ marginTop: 10 }}>
-              {invoices.map((inv) => (
-                <div key={inv.id} className="row" style={{ fontSize: 12.5, padding: "4px 0", alignItems: "center", gap: 8 }}>
-                  <FileIcon fileName={inv.fileName} />
-                  <span>{inv.fileName}</span>
-                  <span className="muted">{new Date(inv.uploadedAt).toLocaleDateString()}</span>
-                  <OpenFileButton url={inv.url} fileName={inv.fileName} />
-                  <button className="del-x" style={{ fontSize: 14 }} onClick={() => handleDeleteInvoice(inv.id)}>
-                    ×
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
         </div>
       </div>
 
-      <div className="card">
-        <h2>
-          Day-rate labour <span className="muted" style={{ fontWeight: 400, fontSize: 13 }}>(all months)</span>
-        </h2>
-        <div className="sub">Primary = mandays × rate. OT = OT-days × 3/8 × rate. Site/Factory split shown per person.</div>
-
-        <div style={{ margin: "12px 0 18px", paddingBottom: 16, borderBottom: "1px solid var(--line)" }}>
-          <div className="fldlabel" style={{ marginBottom: 6 }}>
-            Scope drawing (for allocation)
-          </div>
-          {scopeDrawing && (
-            <div className="row" style={{ fontSize: 12.5, marginBottom: 8, alignItems: "center", gap: 8 }}>
-              <FileIcon fileName={scopeDrawing.fileName} />
-              <span style={{ fontWeight: 560 }}>{scopeDrawing.fileName}</span>
-              <span className="muted">uploaded {new Date(scopeDrawing.uploadedAt).toLocaleDateString()}</span>
-              <OpenFileButton url={scopeDrawing.url} fileName={scopeDrawing.fileName} />
-            </div>
-          )}
-          <input
-            ref={scopeFileInputRef}
-            type="file"
-            style={{ display: "none" }}
-            accept=".pdf,.png,.jpg,.jpeg,.dwg,.dxf"
-            onChange={handleScopeFilePicked}
-          />
-          {!scopeDrawing && (
-            <button className="btn sm" onClick={() => scopeFileInputRef.current?.click()} disabled={scopeUploading}>
-              Upload scope drawing
-            </button>
-          )}
-          {scopeDrawing && isAdmin && (
-            <button className="btn sm" onClick={() => scopeFileInputRef.current?.click()} disabled={scopeUploading}>
-              Replace scope drawing
-            </button>
-          )}
-          {scopeDrawing && !isAdmin && reuploadStatus === "approved" && (
-            <button className="btn sm" onClick={() => scopeFileInputRef.current?.click()} disabled={scopeUploading}>
-              Upload approved drawing
-            </button>
-          )}
-          {scopeDrawing && !isAdmin && reuploadStatus === "none" && (
-            <button className="btn sm" onClick={() => setShowReuploadModal(true)}>
-              Locked — request re-upload
-            </button>
-          )}
-          {scopeDrawing && !isAdmin && reuploadStatus === "pending" && (
-            <span className="muted" style={{ fontSize: 12.5 }}>
-              Re-upload request pending admin approval.
-            </span>
-          )}
-          {pendingScopeFile && (
-            <div className="row" style={{ marginTop: 10, fontSize: 12.5, background: "var(--wknd)", padding: "8px 10px", borderRadius: 6 }}>
-              <span>
-                Ready to upload <b>{pendingScopeFile.name}</b>
-                {scopeDrawing ? " — this replaces the current drawing." : "."}
-              </span>
-              <button className="btn sm" onClick={() => setPendingScopeFile(null)}>
-                Cancel
-              </button>
-              <button className="btn primary sm" onClick={confirmScopeUpload} disabled={scopeUploading}>
-                {scopeUploading ? "Uploading…" : "Confirm upload"}
-              </button>
-            </div>
-          )}
+      {!proj ? (
+        <div className="card">
+          <div className="empty">No sub-projects yet under &quot;{curParent.name}&quot; — add one on the Calendar planner tab.</div>
         </div>
+      ) : (
+        (() => {
+          const s = projStats(state, proj);
+          const actualLabour = s.prim + s.ot;
+          const ceiling = targetCostCeiling(proj);
+          const targetMaterialCeiling = proj.targetLabourCost != null ? materialCeilingRemaining(proj, proj.targetLabourCost) : null;
+          const materialRemaining = materialCeilingRemaining(proj, actualLabour);
 
-        {!dayRows.length ? (
-          <div className="empty">No day-rate resources booked. Book days on the planner.</div>
-        ) : (
-          <table className="rtable">
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th style={{ textAlign: "right" }}>Rate/day</th>
-                <th style={{ textAlign: "right" }}>Primary days</th>
-                <th style={{ textAlign: "right" }}>Site/Fac</th>
-                <th style={{ textAlign: "right" }}>OT hrs</th>
-                <th style={{ textAlign: "right" }}>Primary ₹</th>
-                <th style={{ textAlign: "right" }}>OT ₹</th>
-                <th style={{ textAlign: "right" }}>Total</th>
-              </tr>
-            </thead>
-            <tbody>
-              {dayRows.map(({ p, prim, oth }) => {
-                const pc = prim * p.rate;
-                const oc = oth * p.rate * OT_HR_FRAC;
-                tP += pc;
-                tO += oc;
-                const site = countBandLoc(state, p.id, proj.id, "P", "site");
-                const fac = countBandLoc(state, p.id, proj.id, "P", "factory");
-                const primDates = datesForBand(state, p.id, proj.id, "P");
-                const otDates = datesForBand(state, p.id, proj.id, "O");
-                return (
-                  <tr key={p.id}>
-                    <td>
+          const dayRows = roster
+            .filter((p) => !isSqft(p))
+            .map((p) => ({ p, prim: countBand(state, p.id, proj.id, "P"), oth: sumOtHours(state, p.id, proj.id) }))
+            .filter((x) => x.prim || x.oth);
+
+          let tP = 0,
+            tO = 0;
+
+          return (
+            <div className="subproj-group">
+              <div className="subproj-head">
+                <div>
+                  <div className="path">{curParent.name} / Sub-project</div>
+                  <h3>{proj.name}</h3>
+                </div>
+              </div>
+
+              <div className="subproj-body">
+                <div className="tabset">
+                  {subProjects.map((p) => (
+                    <button key={p.id} className={p.id === current ? "on" : ""} onClick={() => onSetCurrent(p.id)}>
                       {p.name}
-                      <div className="muted" style={{ fontSize: 11 }}>
-                        {p.trade}
-                      </div>
-                    </td>
-                    <td style={{ textAlign: "right" }}>{CUR.format(p.rate)}</td>
-                    <td style={{ textAlign: "right" }}>
-                      {prim}
-                      {primDates.length > 0 && (
-                        <div
-                          className="muted"
-                          style={{ fontSize: 9.5, lineHeight: 1.3, marginTop: 2, maxWidth: 150, marginLeft: "auto" }}
-                        >
-                          {formatDateList(primDates)}
-                        </div>
-                      )}
-                    </td>
-                    <td style={{ textAlign: "right", fontSize: 12 }}>
-                      {site}/{fac}
-                    </td>
-                    <td style={{ textAlign: "right" }}>
-                      {oth || ""}
-                      {otDates.length > 0 && (
-                        <div
-                          className="muted"
-                          style={{ fontSize: 9.5, lineHeight: 1.3, marginTop: 2, maxWidth: 150, marginLeft: "auto" }}
-                        >
-                          {formatDateList(otDates)}
-                        </div>
-                      )}
-                    </td>
-                    <td style={{ textAlign: "right" }}>{CUR.format(pc)}</td>
-                    <td style={{ textAlign: "right" }}>{CUR.format(oc)}</td>
-                    <td style={{ textAlign: "right", fontWeight: 560 }}>{CUR.format(pc + oc)}</td>
-                  </tr>
-                );
-              })}
-              <tr>
-                <td colSpan={5} style={{ textAlign: "right", fontWeight: 700, borderTop: "2px solid var(--ink)" }}>
-                  Day labour total
-                </td>
-                <td style={{ textAlign: "right", fontWeight: 700, borderTop: "2px solid var(--ink)" }}>{CUR.format(tP)}</td>
-                <td style={{ textAlign: "right", fontWeight: 700, borderTop: "2px solid var(--ink)" }}>{CUR.format(tO)}</td>
-                <td style={{ textAlign: "right", fontWeight: 700, borderTop: "2px solid var(--ink)" }}>{CUR.format(tP + tO)}</td>
-              </tr>
-            </tbody>
-          </table>
-        )}
-      </div>
-
-      <div className="card">
-        <h2>
-          Sqft labour <span className="muted" style={{ fontWeight: 400, fontSize: 13 }}>(area-wise)</span>
-        </h2>
-        <div className="sub">Contract trades are cost-driven by area sqft. Their calendar days still block their time.</div>
-        {!sqftPeople.length ? (
-          <div className="empty">No sqft resources booked to this project. Book their days on the planner to enable area entry.</div>
-        ) : (
-          sqftPeople.map((p) => {
-            const list = proj.areas[p.id] || [];
-            let sub = 0;
-            const days = countBand(state, p.id, proj.id, "P");
-            const oth = sumOtHours(state, p.id, proj.id);
-            return (
-              <div className="area-block" key={p.id}>
-                <h3>{p.name}</h3>
-                <div className="who">
-                  {p.trade} · {CUR.format(p.rate)}/sqft · {days} day(s){oth ? ` + ${oth}h OT` : ""} booked
+                    </button>
+                  ))}
                 </div>
-                {list.map((a) => {
-                  const c = (Number(a.sqft) || 0) * p.rate;
-                  sub += c;
-                  return (
-                    <div className="area-row" key={a.id}>
-                      <input
-                        type="text"
-                        className="a-name"
-                        placeholder="Area (e.g. Kitchen)"
-                        value={a.area}
-                        onChange={(e) => onUpdateArea(p.id, a.id, { area: e.target.value })}
-                      />
+
+                <div className="row" style={{ marginBottom: 20 }}>
+                  <div style={{ flex: 1, minWidth: 180 }}>
+                    <span className="fldlabel">Rename sub-project</span>
+                    <input type="text" style={{ width: "100%" }} value={proj.name} onChange={(e) => onRename(proj.id, e.target.value)} />
+                  </div>
+                </div>
+
+                <h2>Activity/Scope Price quoted</h2>
+                <div className="sub">Client-billed / quoted value for this sub-project.</div>
+                <div className="rev-grid">
+                  <label>Activity/Scope Price quoted</label>
+                  <input
+                    type="number"
+                    min={0}
+                    step={1000}
+                    placeholder="0"
+                    value={proj.revenue || ""}
+                    onChange={(e) => onSetRevenue(proj.id, Number(e.target.value) || 0)}
+                  />
+                </div>
+
+                <h2 style={{ marginTop: 22 }}>Material estimate</h2>
+                <div className="sub">Material line items for this sub-project.</div>
+                <div className="mat-row mat-head">
+                  <div>Item</div>
+                  <div>Estimate cost</div>
+                  <div />
+                </div>
+                {proj.materials.map((m) => (
+                  <div className="mat-row" key={m.id}>
+                    <input
+                      type="text"
+                      placeholder="e.g. Plywood, laminate"
+                      value={m.item}
+                      onChange={(e) => onUpdateMaterial(m.id, { item: e.target.value })}
+                    />
+                    <input
+                      type="number"
+                      placeholder="0"
+                      min={0}
+                      value={m.cost || ""}
+                      onChange={(e) => onUpdateMaterial(m.id, { cost: Number(e.target.value) || 0 })}
+                    />
+                    <button className="del-x" onClick={() => onDeleteMaterial(m.id)}>
+                      ×
+                    </button>
+                  </div>
+                ))}
+                <button className="btn sm" onClick={onAddMaterial}>
+                  + Add material
+                </button>
+
+                <h2 style={{ marginTop: 22 }}>Target vs. Actual</h2>
+                <div className="sub">Set a target margin and labour figure once; actuals track live from real bookings and invoices.</div>
+                <div className="split" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18 }}>
+                  <div className="metablock">
+                    <div className="mhead">
+                      <span className="lbl">Target</span>
+                    </div>
+                    <div className="kv">
+                      <span>Target margin</span>
+                      <span>
+                        <input
+                          type="number"
+                          min={0}
+                          max={100}
+                          value={proj.targetMarginPct ?? ""}
+                          placeholder="0"
+                          onChange={(e) => onSetTargets(proj.id, e.target.value === "" ? null : Number(e.target.value), proj.targetLabourCost)}
+                        />{" "}
+                        %
+                      </span>
+                    </div>
+                    <div className="kv computed">
+                      <span>Target cost ceiling</span>
+                      <span className="v">
+                        {CUR.format(ceiling)}
+                        <span className="tag-auto">auto</span>
+                      </span>
+                    </div>
+                    <div className="kv">
+                      <span>Labour cost (target)</span>
                       <input
                         type="number"
-                        className="a-sqft"
-                        placeholder="sqft"
                         min={0}
-                        value={a.sqft || ""}
-                        onChange={(e) => onUpdateArea(p.id, a.id, { sqft: Number(e.target.value) || 0 })}
+                        placeholder="0"
+                        value={proj.targetLabourCost ?? ""}
+                        onChange={(e) => onSetTargets(proj.id, proj.targetMarginPct, e.target.value === "" ? null : Number(e.target.value))}
                       />
-                      <div className="area-cost">
-                        {CUR.format(c)}
-                        <div className="ai">{p.rate}/sqft</div>
-                      </div>
-                      <button className="del-x" onClick={() => onDeleteArea(p.id, a.id)}>
-                        ×
+                    </div>
+                    <div className="kv computed">
+                      <span>Target material ceiling</span>
+                      <span className="v">
+                        {targetMaterialCeiling === null ? "—" : CUR.format(targetMaterialCeiling)}
+                        <span className="tag-auto">= ceiling − labour</span>
+                      </span>
+                    </div>
+                  </div>
+                  <div className="metablock">
+                    <div className="mhead">
+                      <span className="lbl">Actual</span>
+                    </div>
+                    <div className="kv">
+                      <span>
+                        Labour cost <span className="tag-auto">from calendar</span>
+                      </span>
+                      <span className="v">{CUR.format(actualLabour)}</span>
+                    </div>
+                    <div className="kv computed">
+                      <span>Material ceiling remaining</span>
+                      <span className="v">
+                        {CUR.format(materialRemaining)}
+                        <span className="tag-auto">= ceiling − actual labour</span>
+                      </span>
+                    </div>
+                    <div className="kv">
+                      <span>Material invoiced so far</span>
+                      <span className="v">{CUR.format(invoices.length ? s.mat : s.mat)}</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="filesection">
+                  <div className="fshead">
+                    <span className="lbl">Invoices</span>
+                    <button className="btn sm" onClick={() => setShowInvoiceModal(true)}>
+                      Upload invoice(s)
+                    </button>
+                  </div>
+                  {invoices.map((inv) => (
+                    <div key={inv.id} className="filerow">
+                      <FileIcon fileName={inv.fileName} />
+                      <span className="filename">{inv.fileName}</span>
+                      <span className="muted" style={{ fontSize: 11.5 }}>
+                        {new Date(inv.uploadedAt).toLocaleDateString()}
+                      </span>
+                      <OpenFileButton url={inv.url} fileName={inv.fileName} />
+                      {isAdmin && (
+                        <button className="del-x" style={{ fontSize: 14 }} onClick={() => handleDeleteInvoice(inv.id)}>
+                          ×
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                  {!isAdmin && invoices.length > 0 && <p className="muted" style={{ fontSize: 11.5, marginTop: 6 }}>Only admin can delete an invoice.</p>}
+                </div>
+
+                <div className="filesection">
+                  <div className="fshead">
+                    <span className="lbl">Scope drawing</span>
+                  </div>
+                  {scopeDrawing && (
+                    <div className="filerow">
+                      <FileIcon fileName={scopeDrawing.fileName} />
+                      <span className="filename">{scopeDrawing.fileName}</span>
+                      <span className="muted" style={{ fontSize: 11.5 }}>
+                        uploaded {new Date(scopeDrawing.uploadedAt).toLocaleDateString()}
+                      </span>
+                      <OpenFileButton url={scopeDrawing.url} fileName={scopeDrawing.fileName} />
+                      {isAdmin && (
+                        <button className="del-x" style={{ fontSize: 14 }} onClick={handleDeleteScopeDrawing}>
+                          ×
+                        </button>
+                      )}
+                    </div>
+                  )}
+                  <input
+                    ref={scopeFileInputRef}
+                    type="file"
+                    style={{ display: "none" }}
+                    accept=".pdf,.png,.jpg,.jpeg,.dwg,.dxf"
+                    onChange={handleScopeFilePicked}
+                  />
+                  {!scopeDrawing && (
+                    <button className="btn sm" onClick={() => scopeFileInputRef.current?.click()} disabled={scopeUploading}>
+                      Upload scope drawing
+                    </button>
+                  )}
+                  {scopeDrawing && isAdmin && (
+                    <button className="btn sm" onClick={() => scopeFileInputRef.current?.click()} disabled={scopeUploading}>
+                      Replace scope drawing
+                    </button>
+                  )}
+                  {scopeDrawing && !isAdmin && reuploadStatus === "approved" && (
+                    <button className="btn sm" onClick={() => scopeFileInputRef.current?.click()} disabled={scopeUploading}>
+                      Upload approved drawing
+                    </button>
+                  )}
+                  {scopeDrawing && !isAdmin && reuploadStatus === "none" && (
+                    <button className="btn sm" onClick={() => setShowReuploadModal(true)}>
+                      Locked — request re-upload
+                    </button>
+                  )}
+                  {scopeDrawing && !isAdmin && reuploadStatus === "pending" && (
+                    <span className="muted" style={{ fontSize: 12.5 }}>
+                      Re-upload request pending admin approval.
+                    </span>
+                  )}
+                  {pendingScopeFile && (
+                    <div className="row" style={{ marginTop: 10, fontSize: 12.5, background: "var(--wknd)", padding: "8px 10px", borderRadius: 6 }}>
+                      <span>
+                        Ready to upload <b>{pendingScopeFile.name}</b>
+                        {scopeDrawing ? " — this replaces the current drawing." : "."}
+                      </span>
+                      <button className="btn sm" onClick={() => setPendingScopeFile(null)}>
+                        Cancel
+                      </button>
+                      <button className="btn primary sm" onClick={confirmScopeUpload} disabled={scopeUploading}>
+                        {scopeUploading ? "Uploading…" : "Confirm upload"}
                       </button>
                     </div>
-                  );
-                })}
-                <button className="btn sm" onClick={() => onAddArea(p.id)}>
-                  + Add area
-                </button>
-                <span style={{ float: "right", fontWeight: 600 }}>Subtotal {CUR.format(sub)}</span>
-              </div>
-            );
-          })
-        )}
-      </div>
+                  )}
+                </div>
 
-      <div className="card">
-        <h2>Activity/Scope P&amp;L</h2>
-        <div className="sub">{proj.name} · all-months total</div>
-        <div className="sumstrip">
-          <div className="cell2">
-            <div className="k">Primary labour</div>
-            <div className="v">{CUR.format(s.prim)}</div>
-          </div>
-          <div className="cell2">
-            <div className="k">OT labour</div>
-            <div className="v">{CUR.format(s.ot)}</div>
-          </div>
-          <div className="cell2">
-            <div className="k">Sqft labour</div>
-            <div className="v">{CUR.format(s.sq)}</div>
-          </div>
-          <div className="cell2">
-            <div className="k">Material</div>
-            <div className="v">{CUR.format(s.mat)}</div>
-          </div>
-          <div className="cell2">
-            <div className="k">Total cost</div>
-            <div className="v">{CUR.format(s.cost)}</div>
-          </div>
-          <div className="cell2">
-            <div className="k">Revenue</div>
-            <div className="v">{CUR.format(s.rev)}</div>
-          </div>
-          <div className="cell2">
-            <div className="k">Profit</div>
-            <div className={"v " + (s.profit >= 0 ? "pos" : "neg")}>{CUR.format(s.profit)}</div>
-          </div>
-          <div className="cell2">
-            <div className="k">Margin</div>
-            <div className={"v " + (s.profit >= 0 ? "pos" : "neg")}>{s.rev > 0 ? NUM.format(s.margin) + "%" : "—"}</div>
-          </div>
-        </div>
-      </div>
+                <h2 style={{ marginTop: 22 }}>
+                  Day-rate labour <span className="muted" style={{ fontWeight: 400, fontSize: 13 }}>(all months)</span>
+                </h2>
+                <div className="sub">Primary = mandays × rate. OT = OT-days × 3/8 × rate. Site/Factory split shown per person.</div>
+                {!dayRows.length ? (
+                  <div className="empty">No day-rate resources booked. Book days on the planner.</div>
+                ) : (
+                  <table className="rtable">
+                    <thead>
+                      <tr>
+                        <th>Name</th>
+                        <th style={{ textAlign: "right" }}>Rate/day</th>
+                        <th style={{ textAlign: "right" }}>Primary days</th>
+                        <th style={{ textAlign: "right" }}>Site/Fac</th>
+                        <th style={{ textAlign: "right" }}>OT hrs</th>
+                        <th style={{ textAlign: "right" }}>Primary ₹</th>
+                        <th style={{ textAlign: "right" }}>OT ₹</th>
+                        <th style={{ textAlign: "right" }}>Total</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {dayRows.map(({ p, prim, oth }) => {
+                        const pc = prim * p.rate;
+                        const oc = oth * p.rate * OT_HR_FRAC;
+                        tP += pc;
+                        tO += oc;
+                        const site = countBandLoc(state, p.id, proj.id, "P", "site");
+                        const fac = countBandLoc(state, p.id, proj.id, "P", "factory");
+                        const primDates = datesForBand(state, p.id, proj.id, "P");
+                        const otDates = datesForBand(state, p.id, proj.id, "O");
+                        return (
+                          <tr key={p.id}>
+                            <td>
+                              {p.name}
+                              <div className="muted" style={{ fontSize: 11 }}>
+                                {p.trade}
+                              </div>
+                            </td>
+                            <td style={{ textAlign: "right" }}>{CUR.format(p.rate)}</td>
+                            <td style={{ textAlign: "right" }}>
+                              {prim}
+                              {primDates.length > 0 && (
+                                <div
+                                  className="muted"
+                                  style={{ fontSize: 9.5, lineHeight: 1.3, marginTop: 2, maxWidth: 150, marginLeft: "auto" }}
+                                >
+                                  {formatDateList(primDates)}
+                                </div>
+                              )}
+                            </td>
+                            <td style={{ textAlign: "right", fontSize: 12 }}>
+                              {site}/{fac}
+                            </td>
+                            <td style={{ textAlign: "right" }}>
+                              {oth || ""}
+                              {otDates.length > 0 && (
+                                <div
+                                  className="muted"
+                                  style={{ fontSize: 9.5, lineHeight: 1.3, marginTop: 2, maxWidth: 150, marginLeft: "auto" }}
+                                >
+                                  {formatDateList(otDates)}
+                                </div>
+                              )}
+                            </td>
+                            <td style={{ textAlign: "right" }}>{CUR.format(pc)}</td>
+                            <td style={{ textAlign: "right" }}>{CUR.format(oc)}</td>
+                            <td style={{ textAlign: "right", fontWeight: 560 }}>{CUR.format(pc + oc)}</td>
+                          </tr>
+                        );
+                      })}
+                      <tr>
+                        <td colSpan={5} style={{ textAlign: "right", fontWeight: 700, borderTop: "2px solid var(--ink)" }}>
+                          Day labour total
+                        </td>
+                        <td style={{ textAlign: "right", fontWeight: 700, borderTop: "2px solid var(--ink)" }}>{CUR.format(tP)}</td>
+                        <td style={{ textAlign: "right", fontWeight: 700, borderTop: "2px solid var(--ink)" }}>{CUR.format(tO)}</td>
+                        <td style={{ textAlign: "right", fontWeight: 700, borderTop: "2px solid var(--ink)" }}>{CUR.format(tP + tO)}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                )}
+
+                <h2 style={{ marginTop: 22 }}>
+                  Sqft labour <span className="muted" style={{ fontWeight: 400, fontSize: 13 }}>(area-wise)</span>
+                </h2>
+                <div className="sub">Contract trades are cost-driven by area sqft. Their calendar days still block their time.</div>
+                {!sqftPeople.length ? (
+                  <div className="empty">No sqft resources booked to this sub-project. Book their days on the planner to enable area entry.</div>
+                ) : (
+                  sqftPeople.map((p) => {
+                    const list = proj.areas[p.id] || [];
+                    let sub = 0;
+                    const days = countBand(state, p.id, proj.id, "P");
+                    const oth = sumOtHours(state, p.id, proj.id);
+                    return (
+                      <div className="area-block" key={p.id}>
+                        <h3>{p.name}</h3>
+                        <div className="who">
+                          {p.trade} · {CUR.format(p.rate)}/sqft · {days} day(s){oth ? ` + ${oth}h OT` : ""} booked
+                        </div>
+                        {list.map((a) => {
+                          const c = (Number(a.sqft) || 0) * p.rate;
+                          sub += c;
+                          return (
+                            <div className="area-row" key={a.id}>
+                              <input
+                                type="text"
+                                className="a-name"
+                                placeholder="Area (e.g. Kitchen)"
+                                value={a.area}
+                                onChange={(e) => onUpdateArea(p.id, a.id, { area: e.target.value })}
+                              />
+                              <input
+                                type="number"
+                                className="a-sqft"
+                                placeholder="sqft"
+                                min={0}
+                                value={a.sqft || ""}
+                                onChange={(e) => onUpdateArea(p.id, a.id, { sqft: Number(e.target.value) || 0 })}
+                              />
+                              <div className="area-cost">
+                                {CUR.format(c)}
+                                <div className="ai">{p.rate}/sqft</div>
+                              </div>
+                              <button className="del-x" onClick={() => onDeleteArea(p.id, a.id)}>
+                                ×
+                              </button>
+                            </div>
+                          );
+                        })}
+                        <button className="btn sm" onClick={() => onAddArea(p.id)}>
+                          + Add area
+                        </button>
+                        <span style={{ float: "right", fontWeight: 600 }}>Subtotal {CUR.format(sub)}</span>
+                      </div>
+                    );
+                  })
+                )}
+
+                <h2 style={{ marginTop: 22 }}>Activity/Scope P&amp;L</h2>
+                <div className="sub">{proj.name} · all-months total</div>
+                <div className="sumstrip">
+                  <div className="cell2">
+                    <div className="k">Primary labour</div>
+                    <div className="v">{CUR.format(s.prim)}</div>
+                  </div>
+                  <div className="cell2">
+                    <div className="k">OT labour</div>
+                    <div className="v">{CUR.format(s.ot)}</div>
+                  </div>
+                  <div className="cell2">
+                    <div className="k">Sqft labour</div>
+                    <div className="v">{CUR.format(s.sq)}</div>
+                  </div>
+                  <div className="cell2">
+                    <div className="k">Material</div>
+                    <div className="v">{CUR.format(s.mat)}</div>
+                  </div>
+                  <div className="cell2">
+                    <div className="k">Total cost</div>
+                    <div className="v">{CUR.format(s.cost)}</div>
+                  </div>
+                  <div className="cell2">
+                    <div className="k">Revenue</div>
+                    <div className="v">{CUR.format(s.rev)}</div>
+                  </div>
+                  <div className="cell2">
+                    <div className="k">Profit</div>
+                    <div className={"v " + (s.profit >= 0 ? "pos" : "neg")}>{CUR.format(s.profit)}</div>
+                  </div>
+                  <div className="cell2">
+                    <div className="k">Margin</div>
+                    <div className={"v " + (s.profit >= 0 ? "pos" : "neg")}>{s.rev > 0 ? NUM.format(s.margin) + "%" : "—"}</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        })()
+      )}
 
       <div className={"modal-bg" + (showInvoiceModal ? " show" : "")}>
         <div className="modal">
           <h3>Upload invoice</h3>
-          <p>Attach the invoice file corresponding to the material cost for &quot;{proj.name}&quot;.</p>
-          <input type="file" accept=".pdf,.png,.jpg,.jpeg" onChange={handleInvoiceFile} disabled={uploading} />
+          <p>Attach one or more invoice files for &quot;{proj?.name}&quot;.</p>
+          <input type="file" accept=".pdf,.png,.jpg,.jpeg" multiple onChange={handleInvoiceFiles} disabled={uploading} />
           {uploading && <p className="muted">Uploading…</p>}
           <div className="row">
             <button className="btn" onClick={() => setShowInvoiceModal(false)}>
@@ -582,7 +748,7 @@ export default function Pnl({
         <div className="modal">
           <h3>Request scope drawing re-upload</h3>
           <p>
-            Explain why &quot;{proj.name}&quot;&apos;s scope drawing needs to be replaced. An admin must approve
+            Explain why &quot;{proj?.name}&quot;&apos;s scope drawing needs to be replaced. An admin must approve
             before the upload unlocks.
           </p>
           <textarea

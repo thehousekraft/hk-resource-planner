@@ -1,4 +1,4 @@
-import { blankProject } from "@/lib/calc";
+import { blankParentProject, blankProject } from "@/lib/calc";
 import { ensureDefaultProject, loadState } from "../actions";
 import { ensureProfile, getAllowedTabs } from "@/lib/roles";
 import App from "@/components/App";
@@ -9,9 +9,9 @@ export default async function Page() {
   const { role, userId } = await ensureProfile();
   const allowedTabs = await getAllowedTabs(role);
 
-  let roster, projects, bookings;
+  let roster, parentProjects, projects, bookings;
   try {
-    ({ roster, projects, bookings } = await loadState());
+    ({ roster, parentProjects, projects, bookings } = await loadState());
   } catch (e) {
     return (
       <div className="wrap">
@@ -28,14 +28,17 @@ export default async function Page() {
   }
 
   if (!projects.length) {
-    const p = blankProject("Project 1", 0);
-    await ensureDefaultProject(p);
+    const pp = blankParentProject("Project 1");
+    const p = blankProject("General", 0, pp.id);
+    await ensureDefaultProject(pp, p);
+    parentProjects = [pp];
     projects = [p];
   }
 
   return (
     <App
       initialRoster={roster}
+      initialParentProjects={parentProjects}
       initialProjects={projects}
       initialBookings={bookings}
       role={role}

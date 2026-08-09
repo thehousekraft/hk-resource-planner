@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import type { Role } from "@/lib/roleTypes";
 import { COMPANY_DOMAIN } from "@/lib/roleTypes";
 import { CONFIGURABLE_TABS, type ConfigurableRole, type TabKey } from "@/lib/tabs";
-import type { Project } from "@/lib/types";
+import type { ParentProject, Project } from "@/lib/types";
 import {
   approveReuploadRequest,
   getRolePermissionsMatrix,
@@ -26,12 +26,18 @@ const CONFIGURABLE_ROLES: ConfigurableRole[] = ["editor", "viewer"];
 
 export default function Users({
   currentUserId,
+  parentProjects,
   projects,
   onDeleteProject,
+  onDeleteParentProject,
+  onReassignProjectParent,
 }: {
   currentUserId: string;
+  parentProjects: ParentProject[];
   projects: Project[];
   onDeleteProject: (id: string) => void;
+  onDeleteParentProject: (id: string) => void;
+  onReassignProjectParent: (id: string, parentProjectId: string) => void;
 }) {
   const [users, setUsers] = useState<UserRow[]>([]);
   const [invites, setInvites] = useState<PendingInviteRow[]>([]);
@@ -45,6 +51,9 @@ export default function Users({
   const [savingPerms, setSavingPerms] = useState(false);
 
   const [deleteProjId, setDeleteProjId] = useState(projects[0]?.id || "");
+  const [deleteParentId, setDeleteParentId] = useState(parentProjects[0]?.id || "");
+  const [reassignSubId, setReassignSubId] = useState(projects[0]?.id || "");
+  const [reassignParentId, setReassignParentId] = useState(parentProjects[0]?.id || "");
 
   const [reuploadRequests, setReuploadRequests] = useState<ReuploadRequestRow[]>([]);
   const [reqLoading, setReqLoading] = useState(true);
@@ -149,6 +158,17 @@ export default function Users({
   function handleDeleteProject() {
     if (!deleteProjId) return;
     onDeleteProject(deleteProjId);
+  }
+
+  function handleReassignParent() {
+    if (!reassignSubId || !reassignParentId) return;
+    onReassignProjectParent(reassignSubId, reassignParentId);
+  }
+
+  function handleDeleteParentProject() {
+    if (!deleteParentId) return;
+    if (!confirm("Delete this project and all its sub-projects? This cannot be undone.")) return;
+    onDeleteParentProject(deleteParentId);
   }
 
   function toggleTab(r: ConfigurableRole, tab: TabKey) {
@@ -354,8 +374,39 @@ export default function Users({
             </button>
 
             <div style={{ marginTop: 24, paddingTop: 16, borderTop: "1px solid var(--line)" }}>
-              <h3 style={{ fontSize: 13.5, marginBottom: 4 }}>Delete a project</h3>
-              <div className="sub">Admin only. This permanently removes the project and frees its bookings.</div>
+              <h3 style={{ fontSize: 13.5, marginBottom: 4 }}>Assign a sub-project to a project</h3>
+              <div className="sub">
+                Older sub-projects created before projects existed aren&apos;t grouped under one yet. Create the
+                project on the Calendar planner tab first, then group each sub-project here.
+              </div>
+              <div className="row" style={{ marginTop: 8 }}>
+                <select value={reassignSubId} onChange={(e) => setReassignSubId(e.target.value)}>
+                  {projects.map((p) => {
+                    const parentName = parentProjects.find((pp) => pp.id === p.parentProjectId)?.name;
+                    return (
+                      <option key={p.id} value={p.id}>
+                        {p.name} {parentName ? `(currently: ${parentName})` : "(ungrouped)"}
+                      </option>
+                    );
+                  })}
+                </select>
+                <span className="muted">→</span>
+                <select value={reassignParentId} onChange={(e) => setReassignParentId(e.target.value)}>
+                  {parentProjects.map((pp) => (
+                    <option key={pp.id} value={pp.id}>
+                      {pp.name}
+                    </option>
+                  ))}
+                </select>
+                <button className="btn primary sm" onClick={handleReassignParent} disabled={!reassignSubId || !reassignParentId}>
+                  Assign
+                </button>
+              </div>
+            </div>
+
+            <div style={{ marginTop: 20, paddingTop: 16, borderTop: "1px solid var(--line)" }}>
+              <h3 style={{ fontSize: 13.5, marginBottom: 4 }}>Delete a sub-project</h3>
+              <div className="sub">Admin only. This permanently removes the sub-project and frees its bookings.</div>
               <div className="row" style={{ marginTop: 8 }}>
                 <select value={deleteProjId} onChange={(e) => setDeleteProjId(e.target.value)}>
                   {projects.map((p) => (
@@ -365,6 +416,23 @@ export default function Users({
                   ))}
                 </select>
                 <button className="btn warn sm" onClick={handleDeleteProject} disabled={!deleteProjId}>
+                  Delete sub-project
+                </button>
+              </div>
+            </div>
+
+            <div style={{ marginTop: 20, paddingTop: 16, borderTop: "1px solid var(--line)" }}>
+              <h3 style={{ fontSize: 13.5, marginBottom: 4 }}>Delete a project</h3>
+              <div className="sub">Admin only. This permanently removes the project and every sub-project under it.</div>
+              <div className="row" style={{ marginTop: 8 }}>
+                <select value={deleteParentId} onChange={(e) => setDeleteParentId(e.target.value)}>
+                  {parentProjects.map((pp) => (
+                    <option key={pp.id} value={pp.id}>
+                      {pp.name}
+                    </option>
+                  ))}
+                </select>
+                <button className="btn warn sm" onClick={handleDeleteParentProject} disabled={!deleteParentId}>
                   Delete project
                 </button>
               </div>

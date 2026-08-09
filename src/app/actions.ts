@@ -3,7 +3,7 @@
 import { auth } from "@clerk/nextjs/server";
 import { getSupabase } from "@/lib/supabase";
 import { getAllowedTabs, getRole, requireRole, requireTabAccess } from "@/lib/roles";
-import type { AppState, Band, Loc, Project, Resource } from "@/lib/types";
+import type { AppState, Band, Loc, ParentProject, Project, Resource } from "@/lib/types";
 import { bkey } from "@/lib/types";
 import { todayStr } from "@/lib/calc";
 
@@ -22,6 +22,7 @@ function assertWithinUploadLimit(sizeBytes: number) {
 
 export async function loadState(): Promise<{
   roster: Resource[];
+  parentProjects: ParentProject[];
   projects: Project[];
   bookings: AppState["bookings"];
 }> {
@@ -31,18 +32,20 @@ export async function loadState(): Promise<{
   const supa = getSupabase();
   const [
     { data: resources, error: e1 },
-    { data: projRows, error: e2 },
+    { data: parentRows, error: e2 },
+    { data: projRows, error: e2b },
     { data: matRows, error: e3 },
     { data: areaRows, error: e4 },
     { data: bkRows, error: e5 },
   ] = await Promise.all([
     supa.from("resources").select("*").order("id"),
     supa.from("projects").select("*").order("created_at"),
+    supa.from("sub_projects").select("*").order("created_at"),
     supa.from("materials").select("*"),
     supa.from("areas").select("*"),
     supa.from("bookings").select("*"),
   ]);
-  const err = e1 || e2 || e3 || e4 || e5;
+  const err = e1 || e2 || e2b || e3 || e4 || e5;
   if (err) throw err;
 
   const roster: Resource[] = (resources || []).map((r) => ({
@@ -53,11 +56,20 @@ export async function loadState(): Promise<{
     unit: r.unit,
   }));
 
+  const parentProjects: ParentProject[] = (parentRows || []).map((pp) => ({
+    id: pp.id,
+    name: pp.name,
+    customerHoDate: pp.customer_ho_date || null,
+  }));
+
   const projects: Project[] = (projRows || []).map((p) => ({
     id: p.id,
     name: p.name,
     color: p.color,
     revenue: canSeeFinance ? Number(p.revenue) || 0 : 0,
+    parentProjectId: p.parent_project_id || null,
+    targetMarginPct: canSeeFinance ? (p.target_margin_pct === null ? null : Number(p.target_margin_pct)) : null,
+    targetLabourCost: canSeeFinance ? (p.target_labour_cost === null ? null : Number(p.target_labour_cost)) : null,
     materials: [],
     areas: {},
   }));
@@ -85,41 +97,87 @@ export async function loadState(): Promise<{
     };
   });
 
-  return { roster, projects, bookings };
+  return { roster, parentProjects, projects, bookings };
 }
 
-export async function ensureDefaultProject(p: Project) {
+export async function ensureDefaultProject(pp: ParentProject, p: Project) {
   const supa = getSupabase();
+  const { error: ppErr } = await supa.from("projects").insert({ id: pp.id, name: pp.name });
+  if (ppErr) throw ppErr;
   const { error } = await supa
-    .from("projects")
-    .insert({ id: p.id, name: p.name, color: p.color, revenue: 0 });
+    .from("sub_projects")
+    .insert({ id: p.id, name: p.name, color: p.color, revenue: 0, parent_project_id: pp.id });
   if (error) throw error;
 }
 
-/* projects — admin + editor can create/rename/delete projects and book against them;
-   only admin can touch revenue (a cost/P&L figure). */
-export async function insertProject(p: { id: string; name: string; color: string; revenue: number }) {
+/* parent projects — admin + editor can create/rename; deleting cascades its sub-projects
+   (and everything under them), so that stays admin-only, wired from Manage users. */
+export async function insertParentProject(pp: { id: string; name: string }) {
   await requireRole("admin", "editor");
   const supa = getSupabase();
-  const { error } = await supa.from("projects").insert(p);
+  const { error } = await supa.from("projects").insert(pp);
   if (error) throw error;
 }
-export async function updateProjectName(id: string, name: string) {
+export async function updateParentProjectName(id: string, name: string) {
   await requireRole("admin", "editor");
   const supa = getSupabase();
   const { error } = await supa.from("projects").update({ name }).eq("id", id);
   if (error) throw error;
 }
+export async function updateCustomerHoDate(id: string, customerHoDate: string | null) {
+  await requireTabAccess("pnl");
+  const supa = getSupabase();
+  const { error } = await supa.from("projects").update({ customer_ho_date: customerHoDate }).eq("id", id);
+  if (error) throw error;
+}
+export async function deleteParentProject(id: string) {
+  await requireRole("admin");
+  const supa = getSupabase();
+  const { error } = await supa.from("projects").delete().eq("id", id);
+  if (error) throw error;
+}
+
+/* sub-projects — admin + editor can create/rename/delete and book against them;
+   only admin can touch revenue and target margin/labour (P&L figures). */
+export async function insertProject(p: { id: string; name: string; color: string; revenue: number; parentProjectId: string }) {
+  await requireRole("admin", "editor");
+  const supa = getSupabase();
+  const { error } = await supa
+    .from("sub_projects")
+    .insert({ id: p.id, name: p.name, color: p.color, revenue: p.revenue, parent_project_id: p.parentProjectId });
+  if (error) throw error;
+}
+export async function updateProjectName(id: string, name: string) {
+  await requireRole("admin", "editor");
+  const supa = getSupabase();
+  const { error } = await supa.from("sub_projects").update({ name }).eq("id", id);
+  if (error) throw error;
+}
 export async function updateProjectRevenue(id: string, revenue: number) {
   await requireTabAccess("pnl");
   const supa = getSupabase();
-  const { error } = await supa.from("projects").update({ revenue }).eq("id", id);
+  const { error } = await supa.from("sub_projects").update({ revenue }).eq("id", id);
+  if (error) throw error;
+}
+export async function updateProjectTargets(id: string, targetMarginPct: number | null, targetLabourCost: number | null) {
+  await requireTabAccess("pnl");
+  const supa = getSupabase();
+  const { error } = await supa
+    .from("sub_projects")
+    .update({ target_margin_pct: targetMarginPct, target_labour_cost: targetLabourCost })
+    .eq("id", id);
   if (error) throw error;
 }
 export async function deleteProject(id: string) {
   await requireRole("admin", "editor");
   const supa = getSupabase();
-  const { error } = await supa.from("projects").delete().eq("id", id);
+  const { error } = await supa.from("sub_projects").delete().eq("id", id);
+  if (error) throw error;
+}
+export async function updateProjectParent(id: string, parentProjectId: string) {
+  await requireRole("admin");
+  const supa = getSupabase();
+  const { error } = await supa.from("sub_projects").update({ parent_project_id: parentProjectId }).eq("id", id);
   if (error) throw error;
 }
 
@@ -262,6 +320,7 @@ export async function bulkReplaceState(s: AppState) {
   await supa.from("bookings").delete().neq("resource_id", "");
   await supa.from("areas").delete().neq("id", "00000000-0000-0000-0000-000000000000");
   await supa.from("materials").delete().neq("id", "00000000-0000-0000-0000-000000000000");
+  await supa.from("sub_projects").delete().neq("id", "");
   await supa.from("projects").delete().neq("id", "");
   await supa.from("resources").delete().neq("id", "");
 
@@ -271,10 +330,24 @@ export async function bulkReplaceState(s: AppState) {
       .insert(s.roster.map((p) => ({ id: p.id, name: p.name, trade: p.trade, rate: p.rate, unit: p.unit })));
     if (error) throw error;
   }
-  if (s.projects?.length) {
+  if (s.parentProjects?.length) {
     const { error } = await supa
       .from("projects")
-      .insert(s.projects.map((p) => ({ id: p.id, name: p.name, color: p.color, revenue: p.revenue || 0 })));
+      .insert(s.parentProjects.map((pp) => ({ id: pp.id, name: pp.name, customer_ho_date: pp.customerHoDate })));
+    if (error) throw error;
+  }
+  if (s.projects?.length) {
+    const { error } = await supa.from("sub_projects").insert(
+      s.projects.map((p) => ({
+        id: p.id,
+        name: p.name,
+        color: p.color,
+        revenue: p.revenue || 0,
+        parent_project_id: p.parentProjectId,
+        target_margin_pct: p.targetMarginPct,
+        target_labour_cost: p.targetLabourCost,
+      })),
+    );
     if (error) throw error;
   }
 
@@ -356,7 +429,7 @@ export async function finalizeInvoiceUpload(projectId: string, path: string, fil
   if (insErr) throw insErr;
 }
 export async function deleteInvoice(id: string) {
-  await requireTabAccess("pnl");
+  await requireRole("admin");
   const supa = getSupabase();
   const { data: row, error: readErr } = await supa.from("invoices").select("storage_path").eq("id", id).single();
   if (readErr) throw readErr;
@@ -428,6 +501,20 @@ async function resolveScopeUploadAuthorization(supa: ReturnType<typeof getSupaba
     approvedRequestId = approved.id;
   }
   return { existing, approvedRequestId };
+}
+
+export async function deleteScopeDrawing(projectId: string) {
+  await requireRole("admin");
+  const supa = getSupabase();
+  const { data: row, error: readErr } = await supa
+    .from("scope_drawings")
+    .select("storage_path")
+    .eq("project_id", projectId)
+    .single();
+  if (readErr) throw readErr;
+  await supa.storage.from("scope-drawings").remove([row.storage_path]);
+  const { error } = await supa.from("scope_drawings").delete().eq("project_id", projectId);
+  if (error) throw error;
 }
 
 /* Vercel's serverless functions hard-cap request bodies at ~4.5MB regardless of any

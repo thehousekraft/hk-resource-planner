@@ -2,10 +2,10 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { UserButton } from "@clerk/nextjs";
-import type { AreaLine, BookingsMap, MaterialLine, Project, Resource } from "@/lib/types";
+import type { AreaLine, BookingsMap, MaterialLine, ParentProject, Project, Resource } from "@/lib/types";
 import type { Role } from "@/lib/roles";
 import { ALL_TAB_KEYS, TAB_LABELS, type TabKey } from "@/lib/tabs";
-import { blankProject } from "@/lib/calc";
+import { blankParentProject, blankProject } from "@/lib/calc";
 import * as actions from "@/app/actions";
 import Planner from "@/components/Planner";
 import Pnl from "@/components/Pnl";
@@ -18,7 +18,7 @@ import Users from "@/components/Users";
 const UI_KEY = "resPlanner.ui.v1";
 type Tab = TabKey;
 
-function loadUiPrefs(): { month?: string; current?: string } {
+function loadUiPrefs(): { month?: string; currentParent?: string; current?: string } {
   try {
     return JSON.parse(localStorage.getItem(UI_KEY) || "{}") || {};
   } catch {
@@ -28,6 +28,7 @@ function loadUiPrefs(): { month?: string; current?: string } {
 
 export default function App({
   initialRoster,
+  initialParentProjects,
   initialProjects,
   initialBookings,
   role,
@@ -35,6 +36,7 @@ export default function App({
   allowedTabs,
 }: {
   initialRoster: Resource[];
+  initialParentProjects: ParentProject[];
   initialProjects: Project[];
   initialBookings: BookingsMap;
   role: Role;
@@ -45,10 +47,14 @@ export default function App({
   const isViewer = role === "viewer";
   const canSee = (tab: Tab) => isAdmin || (tab !== "users" && allowedTabs.includes(tab));
   const [roster, setRoster] = useState<Resource[]>(initialRoster);
+  const [parentProjects, setParentProjects] = useState<ParentProject[]>(initialParentProjects);
   const [projects, setProjects] = useState<Project[]>(initialProjects);
   const [bookings, setBookings] = useState<BookingsMap>(initialBookings);
   const [month, setMonth] = useState<string>(() => new Date().toISOString().slice(0, 7));
-  const [current, setCurrent] = useState<string>(initialProjects[0]?.id ?? "");
+  const [currentParent, setCurrentParent] = useState<string>(initialParentProjects[0]?.id ?? "");
+  const [current, setCurrent] = useState<string>(
+    initialProjects.find((p) => p.parentProjectId === initialParentProjects[0]?.id)?.id ?? "",
+  );
   const [activeTab, setActiveTab] = useState<Tab>(() => {
     const canSeeAtMount = (tab: Tab) => role === "admin" || (tab !== "users" && allowedTabs.includes(tab));
     return ALL_TAB_KEYS.find(canSeeAtMount) ?? "plan";
@@ -60,17 +66,18 @@ export default function App({
   useEffect(() => {
     const ui = loadUiPrefs();
     if (ui.month) setMonth(ui.month);
+    if (ui.currentParent && parentProjects.some((pp) => pp.id === ui.currentParent)) setCurrentParent(ui.currentParent);
     if (ui.current && projects.some((p) => p.id === ui.current)) setCurrent(ui.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
     try {
-      localStorage.setItem(UI_KEY, JSON.stringify({ month, current }));
+      localStorage.setItem(UI_KEY, JSON.stringify({ month, currentParent, current }));
     } catch {
       /* ignore */
     }
-  }, [month, current]);
+  }, [month, currentParent, current]);
 
   function markSaved() {
     setSaved(true);
@@ -88,17 +95,71 @@ export default function App({
     timers.current[key] = setTimeout(fn, ms);
   }
 
-  const curProj = useMemo(() => projects.find((p) => p.id === current) || projects[0], [projects, current]);
+  const curProj = useMemo(() => projects.find((p) => p.id === current), [projects, current]);
   const [renamingProjectId, setRenamingProjectId] = useState<string | null>(null);
+  const [renamingParentId, setRenamingParentId] = useState<string | null>(null);
 
-  /* ---------- project mutations ---------- */
+  /* ---------- parent project mutations ---------- */
+  function selectParent(id: string) {
+    setCurrentParent(id);
+    const firstSub = projects.find((p) => p.parentProjectId === id);
+    setCurrent(firstSub?.id ?? "");
+  }
+  function addParentProject() {
+    const pp = blankParentProject("Project " + (parentProjects.length + 1));
+    setParentProjects((prev) => [...prev, pp]);
+    setCurrentParent(pp.id);
+    setCurrent("");
+    setRenamingParentId(pp.id);
+    markSaved();
+    actions.insertParentProject({ id: pp.id, name: pp.name }).catch(fail);
+  }
+  function renameParentProject(id: string, name: string) {
+    setParentProjects((prev) => prev.map((pp) => (pp.id === id ? { ...pp, name } : pp)));
+    markSaved();
+    debounced("parent-name:" + id, () => actions.updateParentProjectName(id, name).catch(fail));
+  }
+  function setCustomerHoDate(id: string, date: string) {
+    setParentProjects((prev) => prev.map((pp) => (pp.id === id ? { ...pp, customerHoDate: date || null } : pp)));
+    markSaved();
+    debounced("parent-ho:" + id, () => actions.updateCustomerHoDate(id, date || null).catch(fail));
+  }
+  function deleteParentProject(id: string) {
+    const pp = parentProjects.find((x) => x.id === id);
+    const subs = projects.filter((p) => p.parentProjectId === id);
+    if (!pp || !confirm(`Delete "${pp.name}" and all ${subs.length} of its sub-projects? This cannot be undone.`)) return;
+    const subIds = new Set(subs.map((s) => s.id));
+    setBookings((prev) => {
+      const next = { ...prev };
+      for (const k in next) if (subIds.has(next[k].proj)) delete next[k];
+      return next;
+    });
+    setProjects((prev) => prev.filter((p) => p.parentProjectId !== id));
+    setParentProjects((prev) => {
+      const rest = prev.filter((x) => x.id !== id);
+      if (currentParent === id) {
+        setCurrentParent(rest[0]?.id ?? "");
+        setCurrent(rest[0] ? projects.find((p) => p.parentProjectId === rest[0].id)?.id ?? "" : "");
+      }
+      return rest;
+    });
+    markSaved();
+    actions.deleteParentProject(id).catch(fail);
+  }
+
+  /* ---------- sub-project mutations ---------- */
   function addProject() {
-    const p = blankProject("Project " + (projects.length + 1), projects.length);
+    if (!currentParent) {
+      alert("Create or select a project first.");
+      return;
+    }
+    const subsOfParent = projects.filter((p) => p.parentProjectId === currentParent);
+    const p = blankProject("Sub-project " + (subsOfParent.length + 1), projects.length, currentParent);
     setProjects((prev) => [...prev, p]);
     setCurrent(p.id);
     setRenamingProjectId(p.id);
     markSaved();
-    actions.insertProject({ id: p.id, name: p.name, color: p.color, revenue: 0 }).catch(fail);
+    actions.insertProject({ id: p.id, name: p.name, color: p.color, revenue: 0, parentProjectId: currentParent }).catch(fail);
   }
   function renameProject(id: string, name: string) {
     setProjects((prev) => prev.map((p) => (p.id === id ? { ...p, name } : p)));
@@ -110,12 +171,19 @@ export default function App({
     markSaved();
     debounced("project-revenue:" + id, () => actions.updateProjectRevenue(id, revenue).catch(fail));
   }
+  function setProjectTargets(id: string, targetMarginPct: number | null, targetLabourCost: number | null) {
+    setProjects((prev) => prev.map((p) => (p.id === id ? { ...p, targetMarginPct, targetLabourCost } : p)));
+    markSaved();
+    debounced("project-targets:" + id, () => actions.updateProjectTargets(id, targetMarginPct, targetLabourCost).catch(fail));
+  }
+  function reassignProjectParent(id: string, parentProjectId: string) {
+    setProjects((prev) => prev.map((p) => (p.id === id ? { ...p, parentProjectId } : p)));
+    markSaved();
+    actions.updateProjectParent(id, parentProjectId).catch(fail);
+  }
   function deleteProject(id: string) {
-    if (projects.length <= 1) {
-      alert("Keep at least one project.");
-      return;
-    }
-    if (!curProj || !confirm(`Delete "${projects.find((p) => p.id === id)?.name}"? Its bookings will be freed.`)) return;
+    const proj = projects.find((p) => p.id === id);
+    if (!proj || !confirm(`Delete "${proj.name}"? Its bookings will be freed.`)) return;
     setBookings((prev) => {
       const next = { ...prev };
       for (const k in next) if (next[k].proj === id) delete next[k];
@@ -123,7 +191,10 @@ export default function App({
     });
     setProjects((prev) => {
       const rest = prev.filter((p) => p.id !== id);
-      setCurrent(rest[0]?.id ?? "");
+      if (current === id) {
+        const sameParent = rest.find((p) => p.parentProjectId === proj.parentProjectId);
+        setCurrent(sameParent?.id ?? "");
+      }
       return rest;
     });
     markSaved();
@@ -135,6 +206,7 @@ export default function App({
     return `${date}|${resId}|${band}`;
   }
   function setPrimary(date: string, resId: string) {
+    if (!current) return;
     const key = bookKey(date, resId, "P");
     if (bookings[key]) return;
     setBookings((prev) => ({ ...prev, [key]: { proj: current, loc: activeLoc } }));
@@ -163,6 +235,7 @@ export default function App({
     actions.deleteBooking(date, resId, "O").catch(fail);
   }
   function cycleOt(date: string, resId: string) {
+    if (!current) return;
     const key = bookKey(date, resId, "O");
     const b = bookings[key];
     if (b && b.hrs && b.proj !== current) return;
@@ -366,22 +439,39 @@ export default function App({
       fail(e);
     }
   }
-  async function importBackup(s: { roster: Resource[]; projects: Project[]; bookings: BookingsMap; month?: string; current?: string }) {
+  async function importBackup(s: {
+    roster: Resource[];
+    parentProjects?: ParentProject[];
+    projects: Project[];
+    bookings: BookingsMap;
+    month?: string;
+    current?: string;
+  }) {
     if (!confirm("This will REPLACE all data in the shared database with the contents of this file. Continue?")) return;
     try {
-      await actions.bulkReplaceState({ month: s.month || month, roster: s.roster, projects: s.projects, current: s.current || current, bookings: s.bookings });
+      await actions.bulkReplaceState({
+        month: s.month || month,
+        roster: s.roster,
+        parentProjects: s.parentProjects || [],
+        projects: s.projects,
+        currentParent: currentParent,
+        current: s.current || current,
+        bookings: s.bookings,
+      });
       const fresh = await actions.loadState();
       setRoster(fresh.roster);
+      setParentProjects(fresh.parentProjects);
       setProjects(fresh.projects);
       setBookings(fresh.bookings);
-      setCurrent(fresh.projects[0]?.id ?? "");
+      setCurrentParent(fresh.parentProjects[0]?.id ?? "");
+      setCurrent(fresh.projects.find((p) => p.parentProjectId === fresh.parentProjects[0]?.id)?.id ?? "");
       markSaved();
     } catch (e) {
       fail(e);
     }
   }
 
-  const state = { month, roster, projects, current, bookings };
+  const state = { month, roster, parentProjects, projects, currentParent, current, bookings };
 
   return (
     <div className="wrap">
@@ -421,6 +511,11 @@ export default function App({
             readOnly={isViewer}
             isAdmin={isAdmin}
             renamingProjectId={renamingProjectId}
+            renamingParentId={renamingParentId}
+            onSelectParent={selectParent}
+            onAddParentProject={addParentProject}
+            onRenameParent={renameParentProject}
+            onRenameParentDone={() => setRenamingParentId(null)}
             onSetCurrent={setCurrent}
             onAddProject={addProject}
             onRename={renameProject}
@@ -443,9 +538,12 @@ export default function App({
           <Pnl
             state={state}
             isAdmin={isAdmin}
+            onSelectParent={selectParent}
             onSetCurrent={setCurrent}
             onRename={renameProject}
             onSetRevenue={setRevenue}
+            onSetTargets={setProjectTargets}
+            onSetCustomerHoDate={setCustomerHoDate}
             onAddMaterial={addMaterial}
             onUpdateMaterial={updateMaterial}
             onDeleteMaterial={deleteMaterial}
@@ -492,7 +590,14 @@ export default function App({
 
       {isAdmin && (
         <section className={"panel" + (activeTab === "users" ? " active" : "")}>
-          <Users currentUserId={currentUserId} projects={projects} onDeleteProject={deleteProject} />
+          <Users
+            currentUserId={currentUserId}
+            parentProjects={parentProjects}
+            projects={projects}
+            onDeleteProject={deleteProject}
+            onDeleteParentProject={deleteParentProject}
+            onReassignProjectParent={reassignProjectParent}
+          />
         </section>
       )}
     </div>

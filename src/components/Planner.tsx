@@ -15,6 +15,11 @@ export default function Planner({
   readOnly,
   isAdmin,
   renamingProjectId,
+  renamingParentId,
+  onSelectParent,
+  onAddParentProject,
+  onRenameParent,
+  onRenameParentDone,
   onSetCurrent,
   onAddProject,
   onRename,
@@ -33,6 +38,11 @@ export default function Planner({
   readOnly: boolean;
   isAdmin: boolean;
   renamingProjectId: string | null;
+  renamingParentId: string | null;
+  onSelectParent: (id: string) => void;
+  onAddParentProject: () => void;
+  onRenameParent: (id: string, name: string) => void;
+  onRenameParentDone: () => void;
   onSetCurrent: (id: string) => void;
   onAddProject: () => void;
   onRename: (id: string, name: string) => void;
@@ -44,7 +54,8 @@ export default function Planner({
   onClearSelection: () => void;
   onMoveSelected: (target: string) => void;
 }) {
-  const { month, roster, projects, current, bookings } = state;
+  const { month, roster, parentProjects, projects, currentParent, current, bookings } = state;
+  const subProjects = useMemo(() => projects.filter((p) => p.parentProjectId === currentParent), [projects, currentParent]);
   const days = daysOfMonth(month);
   const today = todayStr();
   const dragging = useRef(false);
@@ -124,42 +135,79 @@ export default function Planner({
   return (
     <div className="card" onMouseUp={() => (dragging.current = false)}>
       <div className="planner-toolbar">
-        <div className="legend">
-          {projects.map((p) =>
-            p.id === renamingProjectId ? (
-              <span key={p.id} className="legchip active" style={{ padding: "2px 6px 2px 10px" }}>
-                <span className="sw" style={{ background: p.color }} />
-                <input
-                  autoFocus
-                  type="text"
-                  defaultValue={p.name}
-                  style={{ width: 140, padding: "3px 6px", border: "1px solid var(--line-strong)", borderRadius: 6 }}
-                  onFocus={(e) => e.target.select()}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      onRename(p.id, e.currentTarget.value.trim() || p.name);
-                      onRenameDone();
-                    } else if (e.key === "Escape") {
-                      onRenameDone();
-                    }
-                  }}
-                  onBlur={(e) => {
-                    onRename(p.id, e.target.value.trim() || p.name);
-                    onRenameDone();
-                  }}
-                />
-              </span>
-            ) : (
-              <button key={p.id} className={"legchip" + (p.id === current ? " active" : "")} onClick={() => onSetCurrent(p.id)}>
-                <span className="sw" style={{ background: p.color }} />
-                {p.name}
-              </button>
-            ),
+        {!readOnly && (
+          <button className="btn sm" onClick={onAddParentProject}>
+            + Create project
+          </button>
+        )}
+        <div>
+          <span className="fldlabel">Project</span>
+          {renamingParentId ? (
+            <input
+              autoFocus
+              type="text"
+              defaultValue={parentProjects.find((pp) => pp.id === renamingParentId)?.name}
+              style={{ minWidth: 200, padding: "8px 10px", border: "1px solid var(--line-strong)", borderRadius: 8 }}
+              onFocus={(e) => e.target.select()}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  onRenameParent(renamingParentId, e.currentTarget.value.trim() || "Project");
+                  onRenameParentDone();
+                } else if (e.key === "Escape") {
+                  onRenameParentDone();
+                }
+              }}
+              onBlur={(e) => {
+                onRenameParent(renamingParentId, e.target.value.trim() || "Project");
+                onRenameParentDone();
+              }}
+            />
+          ) : (
+            <select style={{ minWidth: 200 }} value={currentParent} onChange={(e) => onSelectParent(e.target.value)}>
+              {parentProjects.map((pp) => (
+                <option key={pp.id} value={pp.id}>
+                  {pp.name}
+                </option>
+              ))}
+            </select>
           )}
         </div>
-        {!readOnly && (
+        <div>
+          <span className="fldlabel">Sub-project</span>
+          {renamingProjectId ? (
+            <input
+              autoFocus
+              type="text"
+              defaultValue={projects.find((p) => p.id === renamingProjectId)?.name}
+              style={{ minWidth: 160, padding: "8px 10px", border: "1px solid var(--line-strong)", borderRadius: 8 }}
+              onFocus={(e) => e.target.select()}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  onRename(renamingProjectId, e.currentTarget.value.trim() || "Sub-project");
+                  onRenameDone();
+                } else if (e.key === "Escape") {
+                  onRenameDone();
+                }
+              }}
+              onBlur={(e) => {
+                onRename(renamingProjectId, e.target.value.trim() || "Sub-project");
+                onRenameDone();
+              }}
+            />
+          ) : (
+            <select style={{ minWidth: 160 }} value={current} onChange={(e) => onSetCurrent(e.target.value)} disabled={!subProjects.length}>
+              {!subProjects.length && <option value="">No sub-projects yet</option>}
+              {subProjects.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          )}
+        </div>
+        {!readOnly && currentParent && (
           <button className="btn sm" onClick={onAddProject}>
-            + New project
+            + New sub-project
           </button>
         )}
         <span style={{ width: 1, height: 22, background: "var(--line)" }} />
@@ -187,6 +235,11 @@ export default function Planner({
           </>
         )}
       </div>
+      {!subProjects.length && (
+        <div className="empty" style={{ marginBottom: 16 }}>
+          No sub-projects under this project yet — click &quot;+ New sub-project&quot; to add one.
+        </div>
+      )}
       <div className="legend" style={{ marginBottom: 12 }}>
         <span className="fldlabel" style={{ margin: 0 }}>
           Filter by trade

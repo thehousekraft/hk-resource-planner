@@ -1,4 +1,4 @@
-import type { AppState, Band, Loc, Project, Resource } from "./types";
+import type { AppState, Band, Loc, ParentProject, Project, Resource } from "./types";
 import { bkey } from "./types";
 
 export const PALETTE = ["#1f6f5c", "#2d5f8a", "#a8562a", "#7a4a86", "#3f7d3f", "#b23b3b", "#8a6d1f", "#4a5568", "#307a7a", "#9a4a6a"];
@@ -8,15 +8,36 @@ export const OT_MAX = 5;
 export const CUR = new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 });
 export const NUM = new Intl.NumberFormat("en-IN", { maximumFractionDigits: 1 });
 
-export function blankProject(name: string, idx: number): Project {
+export function blankParentProject(name: string): ParentProject {
+  return {
+    id: "pp" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
+    name: name || "New project",
+    customerHoDate: null,
+  };
+}
+
+export function blankProject(name: string, idx: number, parentProjectId: string | null): Project {
   return {
     id: "p" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
-    name: name || "New project",
+    name: name || "New sub-project",
     color: PALETTE[idx % PALETTE.length],
     materials: [],
     revenue: 0,
+    parentProjectId,
+    targetMarginPct: null,
+    targetLabourCost: null,
     areas: {},
   };
+}
+
+/** Target cost ceiling = quoted price scaled down by the target margin. */
+export function targetCostCeiling(proj: Project): number {
+  const margin = Number(proj.targetMarginPct) || 0;
+  return (Number(proj.revenue) || 0) * (1 - margin / 100);
+}
+/** What's left for material once the (target or actual) labour figure is subtracted from the ceiling. */
+export function materialCeilingRemaining(proj: Project, labourCost: number): number {
+  return targetCostCeiling(proj) - labourCost;
 }
 
 export function isSqft(p: Resource) {
