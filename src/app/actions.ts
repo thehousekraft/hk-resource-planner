@@ -3,7 +3,7 @@
 import { auth } from "@clerk/nextjs/server";
 import { getSupabase } from "@/lib/supabase";
 import { getAllowedTabs, getRole, requireRole, requireTabAccess } from "@/lib/roles";
-import type { AppState, Band, Loc, ParentProject, Project, Resource } from "@/lib/types";
+import type { AppState, BaselineSowRow, Band, Loc, ParentProject, Project, PublicHoliday, Resource, ResourceLeave } from "@/lib/types";
 import { bkey } from "@/lib/types";
 import { todayStr } from "@/lib/calc";
 
@@ -25,6 +25,9 @@ export async function loadState(): Promise<{
   parentProjects: ParentProject[];
   projects: Project[];
   bookings: AppState["bookings"];
+  baselineSow: BaselineSowRow[];
+  leaves: ResourceLeave[];
+  holidays: PublicHoliday[];
 }> {
   const role = await getRole();
   const allowedTabs = await getAllowedTabs(role);
@@ -37,6 +40,9 @@ export async function loadState(): Promise<{
     { data: matRows, error: e3 },
     { data: areaRows, error: e4 },
     { data: bkRows, error: e5 },
+    { data: sowRows, error: e6 },
+    { data: leaveRows, error: e7 },
+    { data: holidayRows, error: e8 },
   ] = await Promise.all([
     supa.from("resources").select("*").order("id"),
     supa.from("projects").select("*").order("created_at"),
@@ -44,9 +50,42 @@ export async function loadState(): Promise<{
     supa.from("materials").select("*"),
     supa.from("areas").select("*"),
     supa.from("bookings").select("*"),
+    supa.from("baseline_sow").select("*").order("created_at"),
+    supa.from("resource_leaves").select("*").order("start_date"),
+    supa.from("public_holidays").select("*").order("date"),
   ]);
-  const err = e1 || e2 || e2b || e3 || e4 || e5;
+  const err = e1 || e2 || e2b || e3 || e4 || e5 || e6 || e7 || e8;
   if (err) throw err;
+
+  const baselineSow: BaselineSowRow[] = (sowRows || []).map((r) => ({
+    id: r.id,
+    orderOfWork: r.order_of_work || "",
+    sow1: r.sow1 || "",
+    sow2: r.sow2 || "",
+    dependencyScope: r.dependency_scope || "",
+    dependentScope1: r.dependent_scope_1 || "",
+    schedulerMethodology: r.scheduler_methodology || "",
+    rateOfWork: Number(r.rate_of_work) || 0,
+    uom: r.uom || "",
+    minLabour: Number(r.min_labour) || 0,
+    phaseOfWork: r.phase_of_work || "",
+    trade1: r.trade1 || "",
+    trade2: r.trade2 || "",
+    material: r.material || "",
+    activityDescription: r.activity_description || "",
+  }));
+  const leaves: ResourceLeave[] = (leaveRows || []).map((r) => ({
+    id: r.id,
+    resourceId: r.resource_id,
+    startDate: r.start_date,
+    endDate: r.end_date,
+    reason: r.reason || "",
+  }));
+  const holidays: PublicHoliday[] = (holidayRows || []).map((r) => ({
+    id: r.id,
+    date: r.date,
+    label: r.label || "",
+  }));
 
   const roster: Resource[] = (resources || []).map((r) => ({
     id: r.id,
@@ -97,7 +136,73 @@ export async function loadState(): Promise<{
     };
   });
 
-  return { roster, parentProjects, projects, bookings };
+  return { roster, parentProjects, projects, bookings, baselineSow, leaves, holidays };
+}
+
+/* Baseline SOW — admin-maintained rate-of-work reference library, uploaded as a whole
+   sheet (replace-all, like the roster's "Clear all resources" pattern). */
+export async function replaceBaselineSow(rows: BaselineSowRow[]) {
+  await requireRole("admin");
+  const supa = getSupabase();
+  const { error: delErr } = await supa.from("baseline_sow").delete().neq("id", "");
+  if (delErr) throw delErr;
+  if (!rows.length) return;
+  const { error } = await supa.from("baseline_sow").insert(
+    rows.map((r) => ({
+      id: r.id,
+      order_of_work: r.orderOfWork,
+      sow1: r.sow1,
+      sow2: r.sow2,
+      dependency_scope: r.dependencyScope,
+      dependent_scope_1: r.dependentScope1,
+      scheduler_methodology: r.schedulerMethodology,
+      rate_of_work: r.rateOfWork,
+      uom: r.uom,
+      min_labour: r.minLabour,
+      phase_of_work: r.phaseOfWork,
+      trade1: r.trade1,
+      trade2: r.trade2,
+      material: r.material,
+      activity_description: r.activityDescription,
+    })),
+  );
+  if (error) throw error;
+}
+export async function deleteBaselineSowRow(id: string) {
+  await requireRole("admin");
+  const supa = getSupabase();
+  const { error } = await supa.from("baseline_sow").delete().eq("id", id);
+  if (error) throw error;
+}
+
+/* Resource leaves — admin-entered planned leave ranges; block calendar cells. */
+export async function insertResourceLeave(l: ResourceLeave) {
+  await requireRole("admin");
+  const supa = getSupabase();
+  const { error } = await supa
+    .from("resource_leaves")
+    .insert({ id: l.id, resource_id: l.resourceId, start_date: l.startDate, end_date: l.endDate, reason: l.reason });
+  if (error) throw error;
+}
+export async function deleteResourceLeave(id: string) {
+  await requireRole("admin");
+  const supa = getSupabase();
+  const { error } = await supa.from("resource_leaves").delete().eq("id", id);
+  if (error) throw error;
+}
+
+/* Public holidays — admin-entered, global (not per-resource); block calendar cells. */
+export async function insertPublicHoliday(h: PublicHoliday) {
+  await requireRole("admin");
+  const supa = getSupabase();
+  const { error } = await supa.from("public_holidays").insert({ id: h.id, date: h.date, label: h.label });
+  if (error) throw error;
+}
+export async function deletePublicHoliday(id: string) {
+  await requireRole("admin");
+  const supa = getSupabase();
+  const { error } = await supa.from("public_holidays").delete().eq("id", id);
+  if (error) throw error;
 }
 
 export async function ensureDefaultProject(pp: ParentProject, p: Project) {

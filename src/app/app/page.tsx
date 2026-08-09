@@ -9,9 +9,9 @@ export default async function Page() {
   const { role, userId } = await ensureProfile();
   const allowedTabs = await getAllowedTabs(role);
 
-  let roster, parentProjects, projects, bookings;
+  let roster, parentProjects, projects, bookings, baselineSow, leaves, holidays;
   try {
-    ({ roster, parentProjects, projects, bookings } = await loadState());
+    ({ roster, parentProjects, projects, bookings, baselineSow, leaves, holidays } = await loadState());
   } catch (e) {
     return (
       <div className="wrap">
@@ -41,6 +41,9 @@ export default async function Page() {
       initialParentProjects={parentProjects}
       initialProjects={projects}
       initialBookings={bookings}
+      initialBaselineSow={baselineSow}
+      initialLeaves={leaves}
+      initialHolidays={holidays}
       role={role}
       currentUserId={userId}
       allowedTabs={allowedTabs}

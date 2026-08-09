@@ -3,7 +3,7 @@
 import { Fragment, useMemo, useRef, useState } from "react";
 import type { AppState, Band, Loc } from "@/lib/types";
 import { bkey } from "@/lib/types";
-import { TRADE_GROUPS, daysOfMonth, groupFor, hasPrimaryDay, isSqft, todayStr } from "@/lib/calc";
+import { TRADE_GROUPS, daysOfMonth, groupFor, hasPrimaryDay, holidayLabel, isSqft, leaveReason, todayStr } from "@/lib/calc";
 
 const ALL_TRADES = "All";
 
@@ -81,8 +81,18 @@ export default function Planner({
     return !isAdmin && date < today;
   }
 
+  /* A public holiday or a resource's planned leave blocks the cell outright — no
+     booking, regardless of project or role. Returns a tooltip string or null. */
+  function blockedReason(date: string, resId: string) {
+    const h = holidayLabel(state, date);
+    if (h) return "Public holiday: " + h;
+    const r = leaveReason(state, resId, date);
+    if (r !== undefined) return r ? "On leave: " + r : "On leave";
+    return null;
+  }
+
   function primaryMouseDown(date: string, resId: string, shiftKey: boolean) {
-    if (readOnly) return;
+    if (readOnly || blockedReason(date, resId)) return;
     const key = bkey(date, resId, "P");
     const b = bookings[key];
     if (b && b.proj !== current) return;
@@ -95,6 +105,7 @@ export default function Planner({
     applyPrimary(date, resId);
   }
   function applyPrimary(date: string, resId: string) {
+    if (blockedReason(date, resId)) return;
     if (dragMode.current === "add") {
       onSetPrimary(date, resId);
     } else if (!isRemovalLocked(date)) {
@@ -106,7 +117,7 @@ export default function Planner({
   }
 
   function otMouseDown(date: string, resId: string, shiftKey: boolean) {
-    if (readOnly) return;
+    if (readOnly || blockedReason(date, resId)) return;
     const key = bkey(date, resId, "O");
     const b = bookings[key];
     if (shiftKey) {
@@ -257,8 +268,9 @@ export default function Planner({
         Each resource has a <b>Primary</b> row (10am–6pm, 8h) and an <b>OT</b> row (from 6pm, 1-hour blocks). Pick the
         active project (legend) and Site/Factory, then <b>click-drag</b> the primary row to book; click a booked day
         to unbook. On the OT row, <b>click a day to add OT hours</b> (cycles 0→5); OT needs a primary that day (can be
-        a different project). Cells owned by other projects are blocked. <b>F</b> marks factory. Shift-click your
-        cells to select them, then Move.
+        a different project). Cells owned by other projects are blocked. Red-hatched cells are a public holiday or a
+        resource&apos;s planned leave (hover for detail) and can&apos;t be booked at all. <b>F</b> marks factory.
+        Shift-click your cells to select them, then Move.
       </div>
       <div className="planner-wrap">
         <table className="cal">
@@ -283,10 +295,12 @@ export default function Planner({
               const primaryCells = days.map((d) => {
                 const key = bkey(d.date, p.id, "P");
                 const b = bookings[key];
+                const blocked = blockedReason(d.date, p.id);
                 let cls = "cell";
                 if (d.dow === 0 || d.dow === 6) cls += " wknd";
                 if (d.date === today) cls += " today";
                 let style: React.CSSProperties = {};
+                if (blocked) cls += " blocked";
                 if (b) {
                   if (b.proj === current) {
                     cls += " mine";
@@ -302,6 +316,7 @@ export default function Planner({
                     key={d.date}
                     className={cls}
                     style={style}
+                    title={blocked || undefined}
                     onMouseDown={(e) => {
                       primaryMouseDown(d.date, p.id, e.shiftKey);
                       e.preventDefault();
@@ -313,11 +328,13 @@ export default function Planner({
               const otCells = days.map((d) => {
                 const key = bkey(d.date, p.id, "O");
                 const b = bookings[key];
+                const blocked = blockedReason(d.date, p.id);
                 let cls = "cell otcell";
                 if (d.dow === 0 || d.dow === 6) cls += " wknd";
                 if (d.date === today) cls += " today";
                 const primHere = hasPrimaryDay(state, d.date, p.id);
                 if (!primHere) cls += " noprim";
+                if (blocked) cls += " blocked";
                 let style: React.CSSProperties = {};
                 let inner: React.ReactNode = null;
                 if (b && b.hrs) {
@@ -335,6 +352,7 @@ export default function Planner({
                     key={d.date}
                     className={cls}
                     style={style}
+                    title={blocked || undefined}
                     onMouseDown={(e) => {
                       otMouseDown(d.date, p.id, e.shiftKey);
                       e.preventDefault();

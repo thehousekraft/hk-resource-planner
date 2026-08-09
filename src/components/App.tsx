@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { UserButton } from "@clerk/nextjs";
-import type { AreaLine, BookingsMap, MaterialLine, ParentProject, Project, Resource } from "@/lib/types";
+import type { AreaLine, BaselineSowRow, BookingsMap, MaterialLine, ParentProject, Project, PublicHoliday, Resource, ResourceLeave } from "@/lib/types";
 import type { Role } from "@/lib/roles";
 import { ALL_TAB_KEYS, TAB_LABELS, type TabKey } from "@/lib/tabs";
 import { blankParentProject, blankProject } from "@/lib/calc";
@@ -31,6 +31,9 @@ export default function App({
   initialParentProjects,
   initialProjects,
   initialBookings,
+  initialBaselineSow,
+  initialLeaves,
+  initialHolidays,
   role,
   currentUserId,
   allowedTabs,
@@ -39,6 +42,9 @@ export default function App({
   initialParentProjects: ParentProject[];
   initialProjects: Project[];
   initialBookings: BookingsMap;
+  initialBaselineSow: BaselineSowRow[];
+  initialLeaves: ResourceLeave[];
+  initialHolidays: PublicHoliday[];
   role: Role;
   currentUserId: string;
   allowedTabs: TabKey[];
@@ -50,6 +56,9 @@ export default function App({
   const [parentProjects, setParentProjects] = useState<ParentProject[]>(initialParentProjects);
   const [projects, setProjects] = useState<Project[]>(initialProjects);
   const [bookings, setBookings] = useState<BookingsMap>(initialBookings);
+  const [baselineSow, setBaselineSow] = useState<BaselineSowRow[]>(initialBaselineSow);
+  const [leaves, setLeaves] = useState<ResourceLeave[]>(initialLeaves);
+  const [holidays, setHolidays] = useState<PublicHoliday[]>(initialHolidays);
   const [month, setMonth] = useState<string>(() => new Date().toISOString().slice(0, 7));
   const [currentParent, setCurrentParent] = useState<string>(initialParentProjects[0]?.id ?? "");
   const [current, setCurrent] = useState<string>(
@@ -457,12 +466,18 @@ export default function App({
         currentParent: currentParent,
         current: s.current || current,
         bookings: s.bookings,
+        baselineSow,
+        leaves,
+        holidays,
       });
       const fresh = await actions.loadState();
       setRoster(fresh.roster);
       setParentProjects(fresh.parentProjects);
       setProjects(fresh.projects);
       setBookings(fresh.bookings);
+      setBaselineSow(fresh.baselineSow);
+      setLeaves(fresh.leaves);
+      setHolidays(fresh.holidays);
       setCurrentParent(fresh.parentProjects[0]?.id ?? "");
       setCurrent(fresh.projects.find((p) => p.parentProjectId === fresh.parentProjects[0]?.id)?.id ?? "");
       markSaved();
@@ -471,7 +486,47 @@ export default function App({
     }
   }
 
-  const state = { month, roster, parentProjects, projects, currentParent, current, bookings };
+  /* ---------- Baseline SOW / leaves / holidays mutations ---------- */
+  async function uploadBaselineSow(rows: Omit<BaselineSowRow, "id">[]) {
+    const stamp = Date.now().toString(36);
+    const created: BaselineSowRow[] = rows.map((r, i) => ({ id: "sow" + stamp + i.toString(36), ...r }));
+    try {
+      await actions.replaceBaselineSow(created);
+      setBaselineSow(created);
+      markSaved();
+    } catch (e) {
+      fail(e);
+    }
+  }
+  function deleteBaselineSowRow(id: string) {
+    setBaselineSow((prev) => prev.filter((r) => r.id !== id));
+    markSaved();
+    actions.deleteBaselineSowRow(id).catch(fail);
+  }
+  function addLeave(resourceId: string, startDate: string, endDate: string, reason: string) {
+    const l: ResourceLeave = { id: "lv" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5), resourceId, startDate, endDate, reason };
+    setLeaves((prev) => [...prev, l]);
+    markSaved();
+    actions.insertResourceLeave(l).catch(fail);
+  }
+  function deleteLeave(id: string) {
+    setLeaves((prev) => prev.filter((l) => l.id !== id));
+    markSaved();
+    actions.deleteResourceLeave(id).catch(fail);
+  }
+  function addHoliday(date: string, label: string) {
+    const h: PublicHoliday = { id: "ph" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5), date, label };
+    setHolidays((prev) => [...prev, h].sort((a, b) => a.date.localeCompare(b.date)));
+    markSaved();
+    actions.insertPublicHoliday(h).catch(fail);
+  }
+  function deleteHoliday(id: string) {
+    setHolidays((prev) => prev.filter((h) => h.id !== id));
+    markSaved();
+    actions.deletePublicHoliday(id).catch(fail);
+  }
+
+  const state = { month, roster, parentProjects, projects, currentParent, current, bookings, baselineSow, leaves, holidays };
 
   return (
     <div className="wrap">
@@ -577,6 +632,7 @@ export default function App({
         <section className={"panel" + (activeTab === "roster" ? " active" : "")}>
           <Roster
             state={state}
+            isAdmin={isAdmin}
             onAddPerson={addPerson}
             onUploadExcel={uploadResourcesExcel}
             onUpdatePerson={updatePerson}
@@ -584,6 +640,12 @@ export default function App({
             onReset={resetRoster}
             onClearAll={clearRoster}
             onImport={importBackup}
+            onUploadBaselineSow={uploadBaselineSow}
+            onDeleteBaselineSowRow={deleteBaselineSowRow}
+            onAddLeave={addLeave}
+            onDeleteLeave={deleteLeave}
+            onAddHoliday={addHoliday}
+            onDeleteHoliday={deleteHoliday}
           />
         </section>
       )}

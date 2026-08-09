@@ -101,6 +101,15 @@ export function datesForBand(state: AppState, resId: string, projId: string, ban
   }
   return dates.sort();
 }
+export function holidayLabel(state: AppState, date: string) {
+  return state.holidays.find((h) => h.date === date)?.label;
+}
+export function leaveReason(state: AppState, resId: string, date: string) {
+  return state.leaves.find((l) => l.resourceId === resId && date >= l.startDate && date <= l.endDate)?.reason;
+}
+export function isOnLeave(state: AppState, resId: string, date: string) {
+  return state.leaves.some((l) => l.resourceId === resId && date >= l.startDate && date <= l.endDate);
+}
 export function formatDateList(dates: string[]) {
   return dates
     .map((d) => {

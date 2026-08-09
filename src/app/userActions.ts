@@ -120,7 +120,7 @@ export async function listPendingReuploadRequests(): Promise<ReuploadRequestRow[
   const supa = getSupabase();
   const { data, error } = await supa
     .from("scope_reupload_requests")
-    .select("id, project_id, justification, created_at, requested_by, projects(name)")
+    .select("id, project_id, justification, created_at, requested_by, sub_projects(name)")
     .eq("status", "pending")
     .order("created_at", { ascending: true });
   if (error) throw error;
@@ -135,7 +135,7 @@ export async function listPendingReuploadRequests(): Promise<ReuploadRequestRow[
   return (data || []).map((r) => ({
     id: r.id,
     projectId: r.project_id,
-    projectName: (r.projects as { name?: string } | null)?.name || r.project_id,
+    projectName: (r.sub_projects as { name?: string } | null)?.name || r.project_id,
     requestedByEmail: emailByUserId[r.requested_by as string] || "—",
     justification: r.justification,
     createdAt: r.created_at,

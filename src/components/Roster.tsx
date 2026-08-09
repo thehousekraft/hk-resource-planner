@@ -1,8 +1,8 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { Fragment, useRef, useState } from "react";
 import * as XLSX from "xlsx";
-import type { AppState, BookingsMap, Project, Resource, Unit } from "@/lib/types";
+import type { AppState, BaselineSowRow, BookingsMap, Project, Resource, Unit } from "@/lib/types";
 import { bkey } from "@/lib/types";
 import { OT_HR_FRAC, countBand, countBandLoc, daysOfMonth, isSqft, monthLabel, otHoursDay, projStats } from "@/lib/calc";
 
@@ -12,6 +12,7 @@ function r0(n: number) {
 
 export default function Roster({
   state,
+  isAdmin,
   onAddPerson,
   onUploadExcel,
   onUpdatePerson,
@@ -19,8 +20,15 @@ export default function Roster({
   onReset,
   onClearAll,
   onImport,
+  onUploadBaselineSow,
+  onDeleteBaselineSowRow,
+  onAddLeave,
+  onDeleteLeave,
+  onAddHoliday,
+  onDeleteHoliday,
 }: {
   state: AppState;
+  isAdmin: boolean;
   onAddPerson: (r: Omit<Resource, "id">) => void;
   onUploadExcel: (rows: Omit<Resource, "id">[]) => void;
   onUpdatePerson: (id: string, patch: Partial<Resource>) => void;
@@ -28,14 +36,124 @@ export default function Roster({
   onReset: () => void;
   onClearAll: () => void;
   onImport: (s: { roster: Resource[]; projects: Project[]; bookings: BookingsMap; month?: string; current?: string }) => void;
+  onUploadBaselineSow: (rows: Omit<BaselineSowRow, "id">[]) => void;
+  onDeleteBaselineSowRow: (id: string) => void;
+  onAddLeave: (resourceId: string, startDate: string, endDate: string, reason: string) => void;
+  onDeleteLeave: (id: string) => void;
+  onAddHoliday: (date: string, label: string) => void;
+  onDeleteHoliday: (id: string) => void;
 }) {
-  const { month, roster, projects, bookings } = state;
+  const { month, roster, projects, bookings, baselineSow, leaves, holidays } = state;
   const [newName, setNewName] = useState("");
   const [newTrade, setNewTrade] = useState("");
   const [newUnit, setNewUnit] = useState<Unit>("day");
   const [newRate, setNewRate] = useState("");
   const fileInput = useRef<HTMLInputElement>(null);
   const excelInput = useRef<HTMLInputElement>(null);
+  const sowInput = useRef<HTMLInputElement>(null);
+
+  const [leaveResId, setLeaveResId] = useState(roster[0]?.id || "");
+  const [leaveStart, setLeaveStart] = useState("");
+  const [leaveEnd, setLeaveEnd] = useState("");
+  const [leaveReason, setLeaveReason] = useState("");
+  const [holidayDate, setHolidayDate] = useState("");
+  const [holidayLabel, setHolidayLabel] = useState("");
+
+  function handleSowUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const buf = reader.result as ArrayBuffer;
+        const wb = XLSX.read(buf, { type: "array" });
+        const sheet = wb.Sheets[wb.SheetNames[0]];
+        // Baseline SOW.xlsx has a merged title row ("Direct Project Costing") above the
+        // real header row, so the header can't be assumed to be row 0 — scan for it instead.
+        const rows: unknown[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
+        const norm = (s: unknown) => String(s ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+        const headerRowIdx = rows.findIndex((r) => r.some((c) => norm(c) === "sow1"));
+        if (headerRowIdx === -1) {
+          alert('Could not find a header row containing "SOW1". Expected the same layout as Baseline SOW.xlsx.');
+          return;
+        }
+        const header = rows[headerRowIdx].map(norm);
+        const col = (aliases: string[]) => header.findIndex((h) => aliases.some((a) => h === a || h.includes(a)));
+        const idx = {
+          orderOfWork: col(["order of work"]),
+          sow1: col(["sow1"]),
+          sow2: col(["sow2"]),
+          dependencyScope: col(["dependency scope"]),
+          dependentScope1: col(["dependent scope 1", "dependent scope"]),
+          schedulerMethodology: col(["scheduler methodology"]),
+          rateOfWork: col(["rate of work"]),
+          uom: col(["uom"]),
+          minLabour: col(["minimum lab", "min. labour", "min labour"]),
+          phaseOfWork: col(["phase of work"]),
+          trade1: col(["manpower1", "trade 1", "trade1"]),
+          trade2: col(["manpower2", "trade 2", "trade2"]),
+          material: col(["material"]),
+          activityDescription: col(["activity description"]),
+        };
+        const at = (row: unknown[], i: number) => (i >= 0 ? row[i] : "");
+        const parsed: Omit<BaselineSowRow, "id">[] = rows
+          .slice(headerRowIdx + 1)
+          .map((row) => ({
+            orderOfWork: String(at(row, idx.orderOfWork) ?? "").trim(),
+            sow1: String(at(row, idx.sow1) ?? "").trim(),
+            sow2: String(at(row, idx.sow2) ?? "").trim(),
+            dependencyScope: String(at(row, idx.dependencyScope) ?? "").trim(),
+            dependentScope1: String(at(row, idx.dependentScope1) ?? "").trim(),
+            schedulerMethodology: String(at(row, idx.schedulerMethodology) ?? "").trim(),
+            rateOfWork: Number(at(row, idx.rateOfWork)) || 0,
+            uom: String(at(row, idx.uom) ?? "").trim(),
+            minLabour: Number(at(row, idx.minLabour)) || 0,
+            phaseOfWork: String(at(row, idx.phaseOfWork) ?? "").trim(),
+            trade1: String(at(row, idx.trade1) ?? "").trim(),
+            trade2: String(at(row, idx.trade2) ?? "").trim(),
+            material: String(at(row, idx.material) ?? "").trim(),
+            activityDescription: String(at(row, idx.activityDescription) ?? "").trim(),
+          }))
+          .filter((r) => r.sow1);
+        if (!parsed.length) {
+          alert("No valid rows found. Expected columns like SOW1, SOW2, Rate of work/hr, UoM, Trade — same as Baseline SOW.xlsx.");
+          return;
+        }
+        if (!confirm(`Replace the entire Baseline SOW library with these ${parsed.length} row(s)?`)) return;
+        onUploadBaselineSow(parsed);
+      } catch {
+        alert("Could not read that Excel file.");
+      }
+    };
+    reader.readAsArrayBuffer(f);
+    e.target.value = "";
+  }
+
+  function handleAddLeave() {
+    if (!leaveResId || !leaveStart || !leaveEnd) {
+      alert("Pick a resource and a start/end date.");
+      return;
+    }
+    if (leaveEnd < leaveStart) {
+      alert("End date must be on or after the start date.");
+      return;
+    }
+    onAddLeave(leaveResId, leaveStart, leaveEnd, leaveReason.trim());
+    setLeaveStart("");
+    setLeaveEnd("");
+    setLeaveReason("");
+  }
+
+  function handleAddHoliday() {
+    const label = holidayLabel.trim();
+    if (!holidayDate || !label) {
+      alert("Pick a date and enter a label.");
+      return;
+    }
+    onAddHoliday(holidayDate, label);
+    setHolidayDate("");
+    setHolidayLabel("");
+  }
 
   function addPerson() {
     const name = newName.trim();
@@ -247,6 +365,7 @@ export default function Roster({
   }
 
   return (
+    <Fragment>
     <div className="card">
       <h2>Manage resources</h2>
       <div className="sub">Add or remove people. Edits persist and flow into the planner. Deleting clears their bookings.</div>
@@ -346,5 +465,186 @@ export default function Roster({
         </button>
       </div>
     </div>
+
+    <div className="card">
+      <h2>Baseline SOW</h2>
+      <div className="sub">
+        Admin-maintained rate-of-work reference library (SOW1/SOW2, rate of work, UoM, trade). Reference data only for
+        now — not yet consumed by any scheduling logic.
+      </div>
+      {!baselineSow.length ? (
+        <div className="empty">No Baseline SOW uploaded yet.</div>
+      ) : (
+        <div style={{ overflowX: "auto" }}>
+          <table className="rtable">
+            <thead>
+              <tr>
+                <th>SOW1</th>
+                <th>SOW2</th>
+                <th className="narrow">Rate/hr</th>
+                <th className="narrow">UoM</th>
+                <th>Trade</th>
+                <th className="narrow">Phase</th>
+                {isAdmin && <th style={{ width: 40 }} />}
+              </tr>
+            </thead>
+            <tbody>
+              {baselineSow.map((r) => (
+                <tr key={r.id}>
+                  <td>{r.sow1}</td>
+                  <td>{r.sow2}</td>
+                  <td className="narrow">{r.rateOfWork || ""}</td>
+                  <td className="narrow">{r.uom}</td>
+                  <td>
+                    {r.trade1}
+                    {r.trade2 ? ", " + r.trade2 : ""}
+                  </td>
+                  <td className="narrow">{r.phaseOfWork}</td>
+                  {isAdmin && (
+                    <td>
+                      <button className="del-x" onClick={() => onDeleteBaselineSowRow(r.id)}>
+                        ×
+                      </button>
+                    </td>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {isAdmin && (
+        <div className="row" style={{ marginTop: 12 }}>
+          <button className="btn sm" onClick={() => sowInput.current?.click()}>
+            Upload Baseline SOW
+          </button>
+          <input ref={sowInput} type="file" accept=".xlsx,.xls" hidden onChange={handleSowUpload} />
+          <span className="muted" style={{ fontSize: 12 }}>
+            Same format as Baseline SOW.xlsx. Replaces the entire library each time you upload.
+          </span>
+        </div>
+      )}
+    </div>
+
+    <div className="card">
+      <h2>Resource leaves</h2>
+      <div className="sub">Planned leave ranges block that resource&apos;s calendar cells on the Calendar planner tab.</div>
+      {!leaves.length ? (
+        <div className="empty">No planned leaves.</div>
+      ) : (
+        <table className="rtable">
+          <thead>
+            <tr>
+              <th>Resource</th>
+              <th className="narrow">From</th>
+              <th className="narrow">To</th>
+              <th>Reason</th>
+              {isAdmin && <th style={{ width: 40 }} />}
+            </tr>
+          </thead>
+          <tbody>
+            {leaves.map((l) => (
+              <tr key={l.id}>
+                <td>{roster.find((p) => p.id === l.resourceId)?.name || l.resourceId}</td>
+                <td className="narrow muted" style={{ fontSize: 12 }}>
+                  {new Date(l.startDate).toLocaleDateString()}
+                </td>
+                <td className="narrow muted" style={{ fontSize: 12 }}>
+                  {new Date(l.endDate).toLocaleDateString()}
+                </td>
+                <td style={{ fontSize: 12.5 }}>{l.reason}</td>
+                {isAdmin && (
+                  <td>
+                    <button className="del-x" onClick={() => onDeleteLeave(l.id)}>
+                      ×
+                    </button>
+                  </td>
+                )}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      {isAdmin && (
+        <div className="addrow" style={{ gridTemplateColumns: "1.3fr 1fr 1fr 1.3fr auto", marginTop: 12 }}>
+          <div className="fld">
+            <label>Resource</label>
+            <select value={leaveResId} onChange={(e) => setLeaveResId(e.target.value)}>
+              {roster.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="fld">
+            <label>From</label>
+            <input type="date" value={leaveStart} onChange={(e) => setLeaveStart(e.target.value)} />
+          </div>
+          <div className="fld">
+            <label>To</label>
+            <input type="date" value={leaveEnd} onChange={(e) => setLeaveEnd(e.target.value)} />
+          </div>
+          <div className="fld">
+            <label>Reason</label>
+            <input type="text" placeholder="Optional" value={leaveReason} onChange={(e) => setLeaveReason(e.target.value)} />
+          </div>
+          <button className="btn primary" onClick={handleAddLeave}>
+            Add
+          </button>
+        </div>
+      )}
+    </div>
+
+    <div className="card">
+      <h2>Public holidays</h2>
+      <div className="sub">Company-wide non-working dates, on top of the fixed weekly Sunday rule. Blocks calendar cells for everyone.</div>
+      {!holidays.length ? (
+        <div className="empty">No public holidays added.</div>
+      ) : (
+        <table className="rtable">
+          <thead>
+            <tr>
+              <th className="narrow">Date</th>
+              <th>Label</th>
+              {isAdmin && <th style={{ width: 40 }} />}
+            </tr>
+          </thead>
+          <tbody>
+            {holidays.map((h) => (
+              <tr key={h.id}>
+                <td className="narrow muted" style={{ fontSize: 12 }}>
+                  {new Date(h.date).toLocaleDateString()}
+                </td>
+                <td>{h.label}</td>
+                {isAdmin && (
+                  <td>
+                    <button className="del-x" onClick={() => onDeleteHoliday(h.id)}>
+                      ×
+                    </button>
+                  </td>
+                )}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      {isAdmin && (
+        <div className="addrow" style={{ gridTemplateColumns: "1fr 1.6fr auto", marginTop: 12 }}>
+          <div className="fld">
+            <label>Date</label>
+            <input type="date" value={holidayDate} onChange={(e) => setHolidayDate(e.target.value)} />
+          </div>
+          <div className="fld">
+            <label>Label</label>
+            <input type="text" placeholder="e.g. Diwali" value={holidayLabel} onChange={(e) => setHolidayLabel(e.target.value)} />
+          </div>
+          <button className="btn primary" onClick={handleAddHoliday}>
+            Add
+          </button>
+        </div>
+      )}
+    </div>
+    </Fragment>
   );
 }
