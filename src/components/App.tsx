@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { UserButton } from "@clerk/nextjs";
-import type { AreaLine, BaselineSowRow, BookingsMap, MaterialLine, ParentProject, Project, PublicHoliday, Resource, ResourceLeave } from "@/lib/types";
+import type { AreaLine, BaselineSowRow, BookingsMap, Loc, MaterialLine, ParentProject, Project, ProjectSowItem, PublicHoliday, Resource, ResourceLeave } from "@/lib/types";
 import type { Role } from "@/lib/roles";
 import { ALL_TAB_KEYS, TAB_LABELS, type TabKey } from "@/lib/tabs";
 import { blankParentProject, blankProject } from "@/lib/calc";
@@ -133,6 +133,11 @@ export default function App({
     markSaved();
     debounced("parent-ho:" + id, () => actions.updateCustomerHoDate(id, date || null).catch(fail));
   }
+  function setProjectStartDate(id: string, date: string) {
+    setParentProjects((prev) => prev.map((pp) => (pp.id === id ? { ...pp, projectStartDate: date || null } : pp)));
+    markSaved();
+    debounced("parent-start:" + id, () => actions.updateProjectStartDate(id, date || null).catch(fail));
+  }
   function deleteParentProject(id: string) {
     const pp = parentProjects.find((x) => x.id === id);
     const subs = projects.filter((p) => p.parentProjectId === id);
@@ -185,6 +190,147 @@ export default function App({
     markSaved();
     debounced("project-targets:" + id, () => actions.updateProjectTargets(id, targetMarginPct, targetLabourCost).catch(fail));
   }
+  /* Creates (or returns) a sub-project with a given name under the current parent. Used by the
+     contract-resource flow for scopes the scheduler derives but no Project SOW row created —
+     e.g. Material Dispatch, which rides along on Modular Furniture's dependency chain. Giving
+     it a real sub-project of its own is what makes it a permanent Sub-scope (Trade) chip and
+     puts its contracted cost on the Activity/Scope P&L under its own name rather than buried
+     inside whichever scope happened to trigger it. */
+  function ensureNamedSubProject(name: string, scopeKey?: string): Project {
+    // Activity-scoped sub-scopes are found by their scopeKey, never by name — two of them can
+    // legitimately share a display name ("Counter Top" appears as two Baseline SOW activities).
+    // Dept-scoped ones keep the original name lookup.
+    const existing = projects.find((p) =>
+      p.parentProjectId === currentParent &&
+      (scopeKey
+        ? p.scopeKey === scopeKey
+        : !p.scopeKey && p.name.trim().toLowerCase() === name.trim().toLowerCase()),
+    );
+    if (existing) return existing;
+    const p = { ...blankProject(name, projects.length, currentParent), scopeKey };
+    setProjects((prev) => [...prev, p]);
+    markSaved();
+    actions
+      .insertProject({ id: p.id, name: p.name, color: p.color, revenue: 0, parentProjectId: currentParent, scopeKey })
+      .catch(fail);
+    return p;
+  }
+
+  async function uploadProjectSow(
+    parentProjectId: string,
+    items: Omit<ProjectSowItem, "id">[],
+    startDate?: string,
+  ): Promise<{ created: number; updated: number }> {
+    const parent = parentProjects.find((pp) => pp.id === parentProjectId);
+    if (startDate && parent && !parent.projectStartDate) {
+      setProjectStartDate(parentProjectId, startDate);
+    }
+    // Sub-projects are grouped by Dept (looked up from Baseline SOW by SOW1/SOW2), not SOW1 —
+    // Dept is the coarser scope the resource-allocation side also understands. An item whose
+    // SOW1/SOW2 has no Baseline SOW match yet (nothing to look up a Dept from) falls back to
+    // grouping by its own SOW1, same as before, so nothing is silently dropped.
+    const deptByKey = new Map<string, string>();
+    baselineSow.forEach((b) => {
+      const key = b.sow1.trim().toLowerCase() + "|" + b.sow2.trim().toLowerCase();
+      if (!deptByKey.has(key)) deptByKey.set(key, b.dept.trim());
+    });
+    const groupNameFor = (it: Omit<ProjectSowItem, "id">) => {
+      const key = it.sow1.trim().toLowerCase() + "|" + it.sow2.trim().toLowerCase();
+      const dept = deptByKey.get(key);
+      return dept || it.sow1.trim();
+    };
+    const groups = new Map<string, Omit<ProjectSowItem, "id">[]>();
+    items.forEach((it) => {
+      const key = groupNameFor(it);
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key)!.push(it);
+    });
+    const existingSubs = projects.filter((p) => p.parentProjectId === parentProjectId);
+    let created = 0;
+    let updated = 0;
+    for (const [groupName, groupItems] of groups) {
+      const stamp = Date.now().toString(36) + Math.random().toString(36).slice(2, 4);
+      const withIds: ProjectSowItem[] = groupItems.map((it, i) => ({ id: "sowi" + stamp + i.toString(36), ...it }));
+      // Skip activity-scoped sub-scopes: they're contract engagements for one scheduler row,
+      // not Dept groupings, so a SOW upload must never absorb or overwrite them even when the
+      // display name happens to match.
+      const existing = existingSubs.find((p) => !p.scopeKey && p.name.trim().toLowerCase() === groupName.toLowerCase());
+      if (existing) {
+        await actions.deleteProjectSowItemsForSubProject(existing.id);
+        await actions.insertProjectSowItems(withIds.map((it) => ({ ...it, subProjectId: existing.id })));
+        setProjects((prev) => prev.map((p) => (p.id === existing.id ? { ...p, sowItems: withIds } : p)));
+        updated++;
+      } else {
+        const p = blankProject(groupName, projects.length + created, parentProjectId);
+        p.sowItems = withIds;
+        await actions.insertProject({ id: p.id, name: p.name, color: p.color, revenue: 0, parentProjectId });
+        await actions.insertProjectSowItems(withIds.map((it) => ({ ...it, subProjectId: p.id })));
+        setProjects((prev) => [...prev, p]);
+        created++;
+      }
+    }
+    markSaved();
+    return { created, updated };
+  }
+
+  /* Commits the scheduler's computed activities + assigned people into real bookings — the
+     "Generate schedule" action (a deliberate reversal of the earlier visual-only design, per
+     the user's 2026-08-12 request). Applies optimistically like every other booking mutation,
+     skipping any cell another project already holds so it never clobbers a manual booking;
+     the server-side bulk action re-checks the same rule authoritatively. */
+  async function generateBookingsFromSchedule(
+    entries: { date: string; resourceId: string; projectId: string; loc: Loc }[],
+  ): Promise<{ inserted: number; skipped: number }> {
+    const toApply = entries.filter((e) => {
+      const existing = bookings[bookKey(e.date, e.resourceId, "P")];
+      return !existing || existing.proj === e.projectId;
+    });
+    const skippedLocally = entries.length - toApply.length;
+    if (toApply.length) {
+      setBookings((prev) => {
+        const next = { ...prev };
+        toApply.forEach((e) => {
+          next[bookKey(e.date, e.resourceId, "P")] = { proj: e.projectId, loc: e.loc };
+        });
+        return next;
+      });
+      markSaved();
+    }
+    const result = await actions.bulkUpsertBookings(
+      toApply.map((e) => ({ date: e.date, resourceId: e.resourceId, projectId: e.projectId, loc: e.loc })),
+    );
+    return { inserted: result.inserted, skipped: skippedLocally + result.skipped };
+  }
+
+  /* "Clear Table Contents" — wipes every sub-project under a parent project (freeing their
+     bookings) so a fresh Project SOW upload starts clean instead of piling up duplicate
+     sub-projects each time the same file gets re-uploaded. */
+  function clearSubProjectsForParent(parentProjectId: string) {
+    const subs = projects.filter((p) => p.parentProjectId === parentProjectId);
+    if (!subs.length) {
+      alert("No sub-projects to clear for this project.");
+      return;
+    }
+    const subIds = new Set(subs.map((s) => s.id));
+    const bookingCount = Object.values(bookings).filter((b) => subIds.has(b.proj)).length;
+    if (
+      !confirm(
+        `Clear all ${subs.length} sub-project(s) for this project (${subs.map((s) => s.name).join(", ")})?\n\n` +
+          `This deletes their uploaded SOW items and frees ${bookingCount} booking cell(s). This cannot be undone.`,
+      )
+    )
+      return;
+    setBookings((prev) => {
+      const next = { ...prev };
+      for (const k in next) if (subIds.has(next[k].proj)) delete next[k];
+      return next;
+    });
+    setProjects((prev) => prev.filter((p) => p.parentProjectId !== parentProjectId));
+    if (subIds.has(current)) setCurrent("");
+    markSaved();
+    actions.clearSubProjectsForParent(parentProjectId).catch(fail);
+  }
+
   function reassignProjectParent(id: string, parentProjectId: string) {
     setProjects((prev) => prev.map((p) => (p.id === id ? { ...p, parentProjectId } : p)));
     markSaved();
@@ -374,11 +520,15 @@ export default function App({
   }
 
   /* ---------- roster mutations ---------- */
-  function addPerson(r: Omit<Resource, "id">) {
+  /* Returns the created resource so callers that need its id straight away can use it — the
+     contract-resource flow on the Planner books the new person onto the scheduler's dates
+     immediately, which needs the id before the next render. */
+  function addPerson(r: Omit<Resource, "id">): Resource {
     const p: Resource = { id: "r" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5), ...r };
     setRoster((prev) => [...prev, p]);
     markSaved();
     actions.insertResource(p).catch(fail);
+    return p;
   }
   function uploadResourcesExcel(rows: Omit<Resource, "id">[]) {
     if (!rows.length) return;
@@ -498,6 +648,14 @@ export default function App({
       fail(e);
     }
   }
+  /* Inline edit of one Baseline SOW row. Debounced per-field like the roster's edits, so
+     typing in a text cell doesn't fire a write per keystroke. */
+  function updateBaselineSowRow(id: string, patch: Partial<BaselineSowRow>) {
+    setBaselineSow((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch } : r)));
+    markSaved();
+    const field = Object.keys(patch)[0] || "";
+    debounced("baseline-sow:" + id + ":" + field, () => actions.updateBaselineSowRow(id, patch).catch(fail));
+  }
   function deleteBaselineSowRow(id: string) {
     setBaselineSow((prev) => prev.filter((r) => r.id !== id));
     markSaved();
@@ -536,10 +694,6 @@ export default function App({
           <p>Calendar bookings with OT and site/factory, double-booking guards, bench &amp; multi-month P&amp;L.</p>
         </div>
         <div className="row">
-          <div>
-            <span className="fldlabel">Planner month</span>
-            <input type="month" value={month} onChange={(e) => setMonth(e.target.value)} />
-          </div>
           <span className={"save-dot" + (saved ? " show" : "")}>Saved ✓</span>
           <span className="badge b-day" style={{ textTransform: "capitalize" }}>
             {role}
@@ -571,6 +725,7 @@ export default function App({
             onAddParentProject={addParentProject}
             onRenameParent={renameParentProject}
             onRenameParentDone={() => setRenamingParentId(null)}
+            onSetProjectStartDate={setProjectStartDate}
             onSetCurrent={setCurrent}
             onAddProject={addProject}
             onRename={renameProject}
@@ -584,6 +739,12 @@ export default function App({
               markSaved();
             }}
             onMoveSelected={moveSelected}
+            onUploadProjectSow={uploadProjectSow}
+            onClearSubProjects={clearSubProjectsForParent}
+            onGenerateBookings={generateBookingsFromSchedule}
+            onSetMonth={setMonth}
+            onAddPerson={addPerson}
+            onEnsureSubProject={ensureNamedSubProject}
           />
         </section>
       )}
@@ -641,6 +802,7 @@ export default function App({
             onClearAll={clearRoster}
             onImport={importBackup}
             onUploadBaselineSow={uploadBaselineSow}
+            onUpdateBaselineSowRow={updateBaselineSowRow}
             onDeleteBaselineSowRow={deleteBaselineSowRow}
             onAddLeave={addLeave}
             onDeleteLeave={deleteLeave}

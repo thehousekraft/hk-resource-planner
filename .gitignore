@@ -21,6 +21,7 @@ build/
 *.pem
 npm-debug.log*
 next-env.d.ts
+*.tsbuildinfo
 
 # local-only Claude Code settings
 .claude/settings.local.json

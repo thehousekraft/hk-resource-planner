@@ -13,6 +13,7 @@ export function blankParentProject(name: string): ParentProject {
     id: "pp" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
     name: name || "New project",
     customerHoDate: null,
+    projectStartDate: null,
   };
 }
 
@@ -27,6 +28,7 @@ export function blankProject(name: string, idx: number, parentProjectId: string 
     targetMarginPct: null,
     targetLabourCost: null,
     areas: {},
+    sowItems: [],
   };
 }
 
@@ -44,6 +46,17 @@ export function isSqft(p: Resource) {
   return p.unit === "sqft";
 }
 
+/** Contract resources engaged for a fixed fee for the whole scope — cost doesn't scale with
+ *  booked days or area. */
+export function isLumpsum(p: Resource) {
+  return p.unit === "lumpsum";
+}
+
+/** Short badge text for a resource's charging basis. */
+export function unitLabel(p: Resource) {
+  return p.unit === "sqft" ? "sqft" : p.unit === "lumpsum" ? "lump" : "day";
+}
+
 export function daysOfMonth(mo: string) {
   const [y, m] = mo.split("-").map(Number);
   const n = new Date(y, m, 0).getDate();
@@ -56,6 +69,28 @@ export function daysOfMonth(mo: string) {
       dow: dt.getDay(),
       dowLbl: ["S", "M", "T", "W", "T", "F", "S"][dt.getDay()],
     });
+  }
+  return arr;
+}
+
+/** Calendar days across an arbitrary inclusive ISO date range, in the same shape daysOfMonth
+ *  returns. Lets the booking grid span a whole project as one scrolling timeline rather than
+ *  paging month by month. */
+export function daysInRange(startISO: string, endISO: string) {
+  const arr: { d: number; date: string; dow: number; dowLbl: string }[] = [];
+  const cur = new Date(startISO + "T00:00:00Z");
+  const end = new Date(endISO + "T00:00:00Z");
+  // Guard against a reversed or absurd range producing an unbounded loop.
+  let guard = 0;
+  while (cur <= end && guard++ < 2000) {
+    const dow = cur.getUTCDay();
+    arr.push({
+      d: cur.getUTCDate(),
+      date: cur.toISOString().slice(0, 10),
+      dow,
+      dowLbl: ["S", "M", "T", "W", "T", "F", "S"][dow],
+    });
+    cur.setUTCDate(cur.getUTCDate() + 1);
   }
   return arr;
 }
@@ -132,7 +167,7 @@ export interface ProjStats {
 export function projStats(state: AppState, proj: Project): ProjStats {
   let prim = 0,
     ot = 0;
-  state.roster.filter((p) => !isSqft(p)).forEach((p) => {
+  state.roster.filter((p) => !isSqft(p) && !isLumpsum(p)).forEach((p) => {
     prim += countBand(state, p.id, proj.id, "P") * p.rate;
     ot += sumOtHours(state, p.id, proj.id) * p.rate * OT_HR_FRAC;
   });
@@ -140,6 +175,11 @@ export function projStats(state: AppState, proj: Project): ProjStats {
   state.roster.filter((p) => isSqft(p)).forEach((p) => {
     const a = proj.areas?.[p.id] || [];
     a.forEach((x) => (sq += (Number(x.sqft) || 0) * p.rate));
+  });
+  // A lumpsum contract is a fixed fee for the scope: charge it once if the resource is booked
+  // on this project at all, regardless of how many days they're deployed for.
+  state.roster.filter(isLumpsum).forEach((p) => {
+    if (countBand(state, p.id, proj.id, "P") > 0) prim += p.rate;
   });
   const mat = (proj.materials || []).reduce((s, m) => s + (Number(m.cost) || 0), 0);
   const rev = Number(proj.revenue) || 0;

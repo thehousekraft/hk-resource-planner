@@ -342,6 +342,39 @@ export default function Pnl({
                   </div>
                 </div>
 
+                {proj.sowItems.length > 0 && (
+                  <>
+                    <h2>
+                      Scope items <span className="tag-auto">from SOW upload</span>
+                    </h2>
+                    <div className="sub">Raw rows from the uploaded Project SOW file that generated this sub-project. Reference only.</div>
+                    <div style={{ overflowX: "auto", marginBottom: 22 }}>
+                      <table className="rtable">
+                        <thead>
+                          <tr>
+                            <th>Area</th>
+                            <th>Product</th>
+                            <th>SOW2</th>
+                            <th className="narrow">Sqft</th>
+                            <th className="narrow">Phase</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {proj.sowItems.map((it) => (
+                            <tr key={it.id}>
+                              <td>{it.area}</td>
+                              <td>{it.productName}</td>
+                              <td>{it.sow2}</td>
+                              <td className="narrow">{it.sqft ? it.sqft.toFixed(1) : ""}</td>
+                              <td className="narrow">{it.phase}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </>
+                )}
+
                 <h2>Activity/Scope Price quoted</h2>
                 <div className="sub">Client-billed / quoted value for this sub-project.</div>
                 <div className="rev-grid">

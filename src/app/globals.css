@@ -38,6 +38,23 @@ input:focus,select:focus{outline:2px solid var(--accent);outline-offset:1px}
 .legend{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 .legchip{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;padding:4px 10px;border-radius:20px;border:1px solid var(--line);cursor:pointer;background:var(--card)}
 .legchip .sw{width:12px;height:12px;border-radius:3px}.legchip.active{border-color:var(--ink);font-weight:600}
+.radiolbl{display:inline-flex;align-items:center;gap:6px;font-size:13.5px;cursor:pointer}
+
+.gantt-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:12px;background:var(--card);margin-top:12px}
+table.gantt{border-collapse:collapse;width:100%;min-width:760px;font-size:10.5px}
+table.gantt th,table.gantt td{border:1px solid var(--line);padding:3px 6px;white-space:nowrap}
+table.gantt thead th{background:var(--paper);font-size:9px;font-weight:600;color:var(--ink-soft);text-align:center;height:24px}
+table.gantt thead th.wknd{background:var(--wknd)}
+table.gantt .meta-col{text-align:left}
+/* The timeline spans the whole project, so the first column pins while scrolling sideways —
+   otherwise a row's identity scrolls out of view long before its bars do. */
+table.gantt thead th.meta-col:first-child,table.gantt tbody td.meta-col:first-child{position:sticky;left:0;z-index:2}
+table.gantt thead th.meta-col:first-child{background:var(--paper)}
+table.gantt tbody td.meta-col:first-child{background:var(--card)}
+table.gantt tbody td.meta-col{font-size:10.5px}
+table.gantt td.day{padding:0;width:22px;height:20px;text-align:center}
+table.gantt td.day.wknd{background:var(--wknd)}
+table.gantt td.day.gspan{opacity:.75}
 
 .seg{display:inline-flex;border:1px solid var(--line-strong);border-radius:8px;overflow:hidden}
 .seg button{border:none;background:var(--card);padding:7px 14px;cursor:pointer;font-weight:560;font-size:12.5px;color:var(--ink-soft)}
@@ -78,7 +95,7 @@ table.cal th,table.cal td{border:1px solid var(--line);padding:0}
 .planner-toolbar{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
 .hint{font-size:12px;color:var(--ink-soft);margin-bottom:10px}
 .badge{display:inline-block;font-size:10.5px;padding:1px 7px;border-radius:5px;font-weight:600;margin-left:5px}
-.b-sqft{background:#f1e8f4;color:#7a4a86}.b-day{background:#e6eef6;color:#2d5f8a}
+.b-sqft{background:#f1e8f4;color:#7a4a86}.b-day{background:#e6eef6;color:#2d5f8a}.b-lump{background:#f3ecdf;color:#8a6a2d}
 .selinfo{background:var(--accent-soft);color:var(--accent);border-radius:8px;padding:7px 12px;font-size:12.5px;font-weight:560}
 
 .rtable{width:100%;border-collapse:collapse}

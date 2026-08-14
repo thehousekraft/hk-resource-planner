@@ -1,10 +1,17 @@
 "use client";
 
-import { Fragment, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
 import type { AppState, BaselineSowRow, BookingsMap, Project, Resource, Unit } from "@/lib/types";
 import { bkey } from "@/lib/types";
 import { OT_HR_FRAC, countBand, countBandLoc, daysOfMonth, isSqft, monthLabel, otHoursDay, projStats } from "@/lib/calc";
+import {
+  createInstructionsUploadUrl,
+  deleteInstructionsFile,
+  finalizeInstructionsUpload,
+  getInstructionsFile,
+  type InstructionsFileRow,
+} from "@/app/actions";
 
 function r0(n: number) {
   return Math.round(Number(n) || 0);
@@ -21,6 +28,7 @@ export default function Roster({
   onClearAll,
   onImport,
   onUploadBaselineSow,
+  onUpdateBaselineSowRow,
   onDeleteBaselineSowRow,
   onAddLeave,
   onDeleteLeave,
@@ -37,6 +45,7 @@ export default function Roster({
   onClearAll: () => void;
   onImport: (s: { roster: Resource[]; projects: Project[]; bookings: BookingsMap; month?: string; current?: string }) => void;
   onUploadBaselineSow: (rows: Omit<BaselineSowRow, "id">[]) => void;
+  onUpdateBaselineSowRow: (id: string, patch: Partial<BaselineSowRow>) => void;
   onDeleteBaselineSowRow: (id: string) => void;
   onAddLeave: (resourceId: string, startDate: string, endDate: string, reason: string) => void;
   onDeleteLeave: (id: string) => void;
@@ -44,13 +53,65 @@ export default function Roster({
   onDeleteHoliday: (id: string) => void;
 }) {
   const { month, roster, projects, bookings, baselineSow, leaves, holidays } = state;
+  // Display the library in execution sequence (Order of Work ascending) rather than upload
+  // order — it reads as the actual build sequence that way. Order of Work is free text in the
+  // sheet, so non-numeric/blank values sort last instead of poisoning the comparison; ties fall
+  // back to SOW1/SOW2 so the order stays stable between renders.
+  const baselineSowSorted = useMemo(() => {
+    const ord = (s: string) => {
+      const n = Number(String(s).trim());
+      return Number.isFinite(n) ? n : Number.MAX_SAFE_INTEGER;
+    };
+    return [...baselineSow].sort(
+      (a, b) =>
+        ord(a.orderOfWork) - ord(b.orderOfWork) ||
+        a.sow1.localeCompare(b.sow1) ||
+        a.sow2.localeCompare(b.sow2),
+    );
+  }, [baselineSow]);
   const [newName, setNewName] = useState("");
   const [newTrade, setNewTrade] = useState("");
   const [newUnit, setNewUnit] = useState<Unit>("day");
   const [newRate, setNewRate] = useState("");
+  const [showRosterDetail, setShowRosterDetail] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const excelInput = useRef<HTMLInputElement>(null);
   const sowInput = useRef<HTMLInputElement>(null);
+  const instructionsInput = useRef<HTMLInputElement>(null);
+  const [instructionsFile, setInstructionsFile] = useState<InstructionsFileRow | null>(null);
+  const [instructionsUploading, setInstructionsUploading] = useState(false);
+
+  useEffect(() => {
+    getInstructionsFile().then(setInstructionsFile).catch((err) => console.error(err));
+  }, []);
+
+  async function handleInstructionsUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0];
+    e.target.value = "";
+    if (!f) return;
+    setInstructionsUploading(true);
+    try {
+      const { signedUrl, path } = await createInstructionsUploadUrl(f.name, f.size);
+      const res = await fetch(signedUrl, { method: "PUT", headers: { "Content-Type": f.type || "application/octet-stream" }, body: f });
+      if (!res.ok) throw new Error(`Upload to storage failed (${res.status})`);
+      await finalizeInstructionsUpload(path, f.name);
+      setInstructionsFile(await getInstructionsFile());
+    } catch (err) {
+      alert("Upload failed: " + (err instanceof Error ? err.message : String(err)));
+    } finally {
+      setInstructionsUploading(false);
+    }
+  }
+
+  async function handleDeleteInstructions() {
+    if (!confirm("Delete the Instructions/calculation file?")) return;
+    try {
+      await deleteInstructionsFile();
+      setInstructionsFile(null);
+    } catch (err) {
+      alert("Could not delete: " + (err instanceof Error ? err.message : String(err)));
+    }
+  }
 
   const [leaveResId, setLeaveResId] = useState(roster[0]?.id || "");
   const [leaveStart, setLeaveStart] = useState("");
@@ -81,6 +142,7 @@ export default function Roster({
         const col = (aliases: string[]) => header.findIndex((h) => aliases.some((a) => h === a || h.includes(a)));
         const idx = {
           orderOfWork: col(["order of work"]),
+          productName: col(["product name"]),
           sow1: col(["sow1"]),
           sow2: col(["sow2"]),
           dependencyScope: col(["dependency scope"]),
@@ -94,12 +156,16 @@ export default function Roster({
           trade2: col(["manpower2", "trade 2", "trade2"]),
           material: col(["material"]),
           activityDescription: col(["activity description"]),
+          dept: col(["dept", "department"]),
+          areaOrCount: col(["area/count", "area / count"]),
+          calculation: col(["calculation"]),
         };
         const at = (row: unknown[], i: number) => (i >= 0 ? row[i] : "");
         const parsed: Omit<BaselineSowRow, "id">[] = rows
           .slice(headerRowIdx + 1)
           .map((row) => ({
             orderOfWork: String(at(row, idx.orderOfWork) ?? "").trim(),
+            productName: String(at(row, idx.productName) ?? "").trim(),
             sow1: String(at(row, idx.sow1) ?? "").trim(),
             sow2: String(at(row, idx.sow2) ?? "").trim(),
             dependencyScope: String(at(row, idx.dependencyScope) ?? "").trim(),
@@ -113,6 +179,9 @@ export default function Roster({
             trade2: String(at(row, idx.trade2) ?? "").trim(),
             material: String(at(row, idx.material) ?? "").trim(),
             activityDescription: String(at(row, idx.activityDescription) ?? "").trim(),
+            dept: String(at(row, idx.dept) ?? "").trim(),
+            areaOrCount: String(at(row, idx.areaOrCount) ?? "").trim(),
+            calculation: String(at(row, idx.calculation) ?? "").trim(),
           }))
           .filter((r) => r.sow1);
         if (!parsed.length) {
@@ -212,7 +281,13 @@ export default function Roster({
                 : detectUnitFromAnyColumn(row) || "day";
             const rateRaw = get(row, ["total cost/day", "total cost per day", "rate"]);
             const rate = Number(rateRaw) || 0;
-            return { name, trade, unit, rate };
+            const empId = String(get(row, ["emp id", "employee id"]) ?? "").trim() || undefined;
+            const dept = String(get(row, ["dept", "department"]) ?? "").trim() || undefined;
+            const payoutType = String(get(row, ["payout type"]) ?? "").trim() || undefined;
+            const tradeCode = String(get(row, ["trade code"]) ?? "").trim() || undefined;
+            const seniority = String(get(row, ["seniority"]) ?? "").trim() || undefined;
+            const resourceCode = String(get(row, ["resource code"]) ?? "").trim() || undefined;
+            return { name, trade, unit, rate, empId, dept, payoutType, tradeCode, seniority, resourceCode };
           })
           .filter((r) => r.name && r.rate > 0);
 
@@ -369,6 +444,11 @@ export default function Roster({
     <div className="card">
       <h2>Manage resources</h2>
       <div className="sub">Add or remove people. Edits persist and flow into the planner. Deleting clears their bookings.</div>
+      <div className="row" style={{ marginBottom: 8 }}>
+        <button className="btn sm" onClick={() => setShowRosterDetail((v) => !v)}>
+          {showRosterDetail ? "Hide" : "Show"} Manpower detail columns
+        </button>
+      </div>
       <div style={{ overflowX: "auto" }}>
         <table className="rtable">
           <thead>
@@ -377,6 +457,16 @@ export default function Roster({
               <th>Trade</th>
               <th className="narrow">Billing</th>
               <th className="narrow">Rate</th>
+              {showRosterDetail && (
+                <>
+                  <th className="narrow">Emp ID</th>
+                  <th>Dept</th>
+                  <th className="narrow">Payout</th>
+                  <th className="narrow">Trade code</th>
+                  <th className="narrow">Seniority</th>
+                  <th className="narrow">Resource code</th>
+                </>
+              )}
               <th style={{ width: 40 }} />
             </tr>
           </thead>
@@ -393,6 +483,7 @@ export default function Roster({
                   <select value={p.unit} onChange={(e) => onUpdatePerson(p.id, { unit: e.target.value as Unit })}>
                     <option value="day">Per day</option>
                     <option value="sqft">Per sqft</option>
+                    <option value="lumpsum">Lumpsum</option>
                   </select>
                 </td>
                 <td className="narrow">
@@ -403,6 +494,16 @@ export default function Roster({
                     onChange={(e) => onUpdatePerson(p.id, { rate: Number(e.target.value) || 0 })}
                   />
                 </td>
+                {showRosterDetail && (
+                  <>
+                    <td className="narrow muted" style={{ fontSize: 12 }}>{p.empId || ""}</td>
+                    <td className="muted" style={{ fontSize: 12 }}>{p.dept || ""}</td>
+                    <td className="narrow muted" style={{ fontSize: 12 }}>{p.payoutType || ""}</td>
+                    <td className="narrow muted" style={{ fontSize: 12 }}>{p.tradeCode || ""}</td>
+                    <td className="narrow muted" style={{ fontSize: 12 }}>{p.seniority || ""}</td>
+                    <td className="narrow muted" style={{ fontSize: 12 }}>{p.resourceCode || ""}</td>
+                  </>
+                )}
                 <td>
                   <button className="del-x" onClick={() => onDeletePerson(p.id, p.name)}>
                     ×
@@ -427,6 +528,7 @@ export default function Roster({
           <select value={newUnit} onChange={(e) => setNewUnit(e.target.value as Unit)}>
             <option value="day">Per day</option>
             <option value="sqft">Per sqft</option>
+            <option value="lumpsum">Lumpsum</option>
           </select>
         </div>
         <div className="fld">
@@ -446,7 +548,10 @@ export default function Roster({
           Clear all resources
         </button>
         <span className="muted" style={{ fontSize: 12 }}>
-          Same format as Manpower.xlsx: Employee Name, Trade, Total cost/day (rate), and per day / per SQFT billing. Adds to the existing roster; rows without a name or rate are skipped — clear the roster first if re-uploading to avoid duplicates.
+          Same format as Manpower.xlsx: Employee Name, Trade, Total cost/day (rate), and per day / per SQFT billing —
+          also picks up Emp ID, Dept, Payout Type, Trade Code, Seniority and Resource Code when present (Manpower
+          V2&apos;s columns), shown under &quot;Show Manpower detail columns&quot; above. Adds to the existing roster;
+          rows without a name or rate are skipped — clear the roster first if re-uploading to avoid duplicates.
         </span>
       </div>
       <div className="row" style={{ marginTop: 18 }}>
@@ -469,8 +574,15 @@ export default function Roster({
     <div className="card">
       <h2>Baseline SOW</h2>
       <div className="sub">
-        Admin-maintained rate-of-work reference library (SOW1/SOW2, rate of work, UoM, trade). Reference data only for
-        now — not yet consumed by any scheduling logic.
+        Admin-maintained rate-of-work reference library, matched by SOW1/SOW2 against uploaded Project SOW files to
+        drive the scheduler on the Calendar planner tab. Sorted by Order of Work.
+        {isAdmin && (
+          <>
+            {" "}
+            Cells are editable and save as you type — but note a full re-upload replaces the whole library, so mirror
+            any fix here in your master Excel too or the next upload will overwrite it.
+          </>
+        )}
       </div>
       {!baselineSow.length ? (
         <div className="empty">No Baseline SOW uploaded yet.</div>
@@ -479,36 +591,117 @@ export default function Roster({
           <table className="rtable">
             <thead>
               <tr>
+                <th className="narrow">Order</th>
+                <th>Product name</th>
                 <th>SOW1</th>
                 <th>SOW2</th>
+                <th className="narrow">Dep?</th>
+                <th>Dependent scope 1</th>
+                <th>Methodology</th>
                 <th className="narrow">Rate/hr</th>
                 <th className="narrow">UoM</th>
-                <th>Trade</th>
+                <th className="narrow">MinLab</th>
                 <th className="narrow">Phase</th>
+                <th>Trade 1</th>
+                <th>Trade 2</th>
+                <th>Dept</th>
+                <th>Material</th>
+                <th>Activity description</th>
+                <th className="narrow">Area/Count</th>
+                <th>Calculation</th>
                 {isAdmin && <th style={{ width: 40 }} />}
               </tr>
             </thead>
             <tbody>
-              {baselineSow.map((r) => (
-                <tr key={r.id}>
-                  <td>{r.sow1}</td>
-                  <td>{r.sow2}</td>
-                  <td className="narrow">{r.rateOfWork || ""}</td>
-                  <td className="narrow">{r.uom}</td>
-                  <td>
-                    {r.trade1}
-                    {r.trade2 ? ", " + r.trade2 : ""}
-                  </td>
-                  <td className="narrow">{r.phaseOfWork}</td>
-                  {isAdmin && (
-                    <td>
-                      <button className="del-x" onClick={() => onDeleteBaselineSowRow(r.id)}>
-                        ×
-                      </button>
+              {baselineSowSorted.map((r) => {
+                /* Admins edit the library in place; everyone else sees plain text. Scheduler
+                   Methodology and Dependency scope are pickers rather than free text because
+                   the scheduler branches on their exact values (see scheduler.ts) — a typo
+                   there silently changes how days are computed. */
+                const text = (field: keyof BaselineSowRow, extra?: React.CSSProperties) =>
+                  isAdmin ? (
+                    <input
+                      type="text"
+                      value={String(r[field] ?? "")}
+                      style={extra}
+                      onChange={(e) => onUpdateBaselineSowRow(r.id, { [field]: e.target.value } as Partial<BaselineSowRow>)}
+                    />
+                  ) : (
+                    <>{String(r[field] ?? "")}</>
+                  );
+                const num = (field: "rateOfWork" | "minLabour") =>
+                  isAdmin ? (
+                    <input
+                      type="number"
+                      min={0}
+                      step="any"
+                      value={r[field] || ""}
+                      onChange={(e) => onUpdateBaselineSowRow(r.id, { [field]: Number(e.target.value) || 0 })}
+                    />
+                  ) : (
+                    <>{r[field] || ""}</>
+                  );
+                return (
+                  <tr key={r.id}>
+                    <td className="narrow">{text("orderOfWork")}</td>
+                    <td>{text("productName")}</td>
+                    <td>{text("sow1")}</td>
+                    <td>{text("sow2")}</td>
+                    <td className="narrow">
+                      {isAdmin ? (
+                        <select
+                          value={r.dependencyScope.trim().toLowerCase() === "y" ? "y" : "n"}
+                          onChange={(e) => onUpdateBaselineSowRow(r.id, { dependencyScope: e.target.value })}
+                        >
+                          <option value="n">n</option>
+                          <option value="y">y</option>
+                        </select>
+                      ) : (
+                        r.dependencyScope
+                      )}
                     </td>
-                  )}
-                </tr>
-              ))}
+                    <td>{text("dependentScope1")}</td>
+                    <td style={{ fontSize: 12 }}>
+                      {isAdmin ? (
+                        <select
+                          value={r.schedulerMethodology}
+                          onChange={(e) => onUpdateBaselineSowRow(r.id, { schedulerMethodology: e.target.value })}
+                        >
+                          {/* keep any legacy/unrecognised value selectable so editing one field
+                              never silently rewrites another */}
+                          {!["Rate of work/hr", "Activity/Item", "Manual", ""].includes(r.schedulerMethodology) && (
+                            <option value={r.schedulerMethodology}>{r.schedulerMethodology}</option>
+                          )}
+                          <option value="">—</option>
+                          <option value="Rate of work/hr">Rate of work/hr</option>
+                          <option value="Activity/Item">Activity/Item</option>
+                          <option value="Manual">Manual</option>
+                        </select>
+                      ) : (
+                        r.schedulerMethodology
+                      )}
+                    </td>
+                    <td className="narrow">{num("rateOfWork")}</td>
+                    <td className="narrow">{text("uom")}</td>
+                    <td className="narrow">{num("minLabour")}</td>
+                    <td className="narrow">{text("phaseOfWork")}</td>
+                    <td>{text("trade1")}</td>
+                    <td>{text("trade2")}</td>
+                    <td>{text("dept")}</td>
+                    <td>{text("material")}</td>
+                    <td style={{ fontSize: 12 }}>{text("activityDescription")}</td>
+                    <td className="narrow">{text("areaOrCount")}</td>
+                    <td style={{ fontSize: 12 }}>{text("calculation")}</td>
+                    {isAdmin && (
+                      <td>
+                        <button className="del-x" onClick={() => onDeleteBaselineSowRow(r.id)}>
+                          ×
+                        </button>
+                      </td>
+                    )}
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -522,6 +715,40 @@ export default function Roster({
           <span className="muted" style={{ fontSize: 12 }}>
             Same format as Baseline SOW.xlsx. Replaces the entire library each time you upload.
           </span>
+        </div>
+      )}
+    </div>
+
+    <div className="card">
+      <h2>Instructions / calculation file</h2>
+      <div className="sub">
+        Reference copy of the scheduler&apos;s computation rules (e.g. Instructions.xlsx). Stored for record-keeping
+        only — the actual scheduling logic lives in code, not parsed from this file.
+      </div>
+      {!instructionsFile ? (
+        <div className="empty">No Instructions file uploaded yet.</div>
+      ) : (
+        <div className="filerow">
+          <span className="filename">{instructionsFile.fileName}</span>
+          <span className="muted" style={{ fontSize: 11.5 }}>
+            uploaded {new Date(instructionsFile.uploadedAt).toLocaleDateString()}
+          </span>
+          <a className="btn sm" href={instructionsFile.url} target="_blank" rel="noopener noreferrer" style={{ textDecoration: "none" }}>
+            Open file
+          </a>
+          {isAdmin && (
+            <button className="del-x" style={{ fontSize: 14 }} onClick={handleDeleteInstructions}>
+              ×
+            </button>
+          )}
+        </div>
+      )}
+      {isAdmin && (
+        <div className="row" style={{ marginTop: 12 }}>
+          <button className="btn sm" onClick={() => instructionsInput.current?.click()} disabled={instructionsUploading}>
+            {instructionsUploading ? "Uploading…" : instructionsFile ? "Replace file" : "Upload Instructions file"}
+          </button>
+          <input ref={instructionsInput} type="file" accept=".xlsx,.xls,.pdf,.doc,.docx" hidden onChange={handleInstructionsUpload} />
         </div>
       )}
     </div>
