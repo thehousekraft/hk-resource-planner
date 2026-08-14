@@ -30,8 +30,6 @@ export default function Roster({
   onUploadBaselineSow,
   onUpdateBaselineSowRow,
   onDeleteBaselineSowRow,
-  onAddLeave,
-  onDeleteLeave,
   onAddHoliday,
   onDeleteHoliday,
 }: {
@@ -47,12 +45,10 @@ export default function Roster({
   onUploadBaselineSow: (rows: Omit<BaselineSowRow, "id">[]) => void;
   onUpdateBaselineSowRow: (id: string, patch: Partial<BaselineSowRow>) => void;
   onDeleteBaselineSowRow: (id: string) => void;
-  onAddLeave: (resourceId: string, startDate: string, endDate: string, reason: string) => void;
-  onDeleteLeave: (id: string) => void;
   onAddHoliday: (date: string, label: string) => void;
   onDeleteHoliday: (id: string) => void;
 }) {
-  const { month, roster, projects, bookings, baselineSow, leaves, holidays } = state;
+  const { month, roster, projects, bookings, baselineSow, holidays } = state;
   // Display the library in execution sequence (Order of Work ascending) rather than upload
   // order — it reads as the actual build sequence that way. Order of Work is free text in the
   // sheet, so non-numeric/blank values sort last instead of poisoning the comparison; ties fall
@@ -113,10 +109,6 @@ export default function Roster({
     }
   }
 
-  const [leaveResId, setLeaveResId] = useState(roster[0]?.id || "");
-  const [leaveStart, setLeaveStart] = useState("");
-  const [leaveEnd, setLeaveEnd] = useState("");
-  const [leaveReason, setLeaveReason] = useState("");
   const [holidayDate, setHolidayDate] = useState("");
   const [holidayLabel, setHolidayLabel] = useState("");
 
@@ -196,21 +188,6 @@ export default function Roster({
     };
     reader.readAsArrayBuffer(f);
     e.target.value = "";
-  }
-
-  function handleAddLeave() {
-    if (!leaveResId || !leaveStart || !leaveEnd) {
-      alert("Pick a resource and a start/end date.");
-      return;
-    }
-    if (leaveEnd < leaveStart) {
-      alert("End date must be on or after the start date.");
-      return;
-    }
-    onAddLeave(leaveResId, leaveStart, leaveEnd, leaveReason.trim());
-    setLeaveStart("");
-    setLeaveEnd("");
-    setLeaveReason("");
   }
 
   function handleAddHoliday() {
@@ -749,76 +726,6 @@ export default function Roster({
             {instructionsUploading ? "Uploading…" : instructionsFile ? "Replace file" : "Upload Instructions file"}
           </button>
           <input ref={instructionsInput} type="file" accept=".xlsx,.xls,.pdf,.doc,.docx" hidden onChange={handleInstructionsUpload} />
-        </div>
-      )}
-    </div>
-
-    <div className="card">
-      <h2>Resource leaves</h2>
-      <div className="sub">Planned leave ranges block that resource&apos;s calendar cells on the Calendar planner tab.</div>
-      {!leaves.length ? (
-        <div className="empty">No planned leaves.</div>
-      ) : (
-        <table className="rtable">
-          <thead>
-            <tr>
-              <th>Resource</th>
-              <th className="narrow">From</th>
-              <th className="narrow">To</th>
-              <th>Reason</th>
-              {isAdmin && <th style={{ width: 40 }} />}
-            </tr>
-          </thead>
-          <tbody>
-            {leaves.map((l) => (
-              <tr key={l.id}>
-                <td>{roster.find((p) => p.id === l.resourceId)?.name || l.resourceId}</td>
-                <td className="narrow muted" style={{ fontSize: 12 }}>
-                  {new Date(l.startDate).toLocaleDateString()}
-                </td>
-                <td className="narrow muted" style={{ fontSize: 12 }}>
-                  {new Date(l.endDate).toLocaleDateString()}
-                </td>
-                <td style={{ fontSize: 12.5 }}>{l.reason}</td>
-                {isAdmin && (
-                  <td>
-                    <button className="del-x" onClick={() => onDeleteLeave(l.id)}>
-                      ×
-                    </button>
-                  </td>
-                )}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-      {isAdmin && (
-        <div className="addrow" style={{ gridTemplateColumns: "1.3fr 1fr 1fr 1.3fr auto", marginTop: 12 }}>
-          <div className="fld">
-            <label>Resource</label>
-            <select value={leaveResId} onChange={(e) => setLeaveResId(e.target.value)}>
-              {roster.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="fld">
-            <label>From</label>
-            <input type="date" value={leaveStart} onChange={(e) => setLeaveStart(e.target.value)} />
-          </div>
-          <div className="fld">
-            <label>To</label>
-            <input type="date" value={leaveEnd} onChange={(e) => setLeaveEnd(e.target.value)} />
-          </div>
-          <div className="fld">
-            <label>Reason</label>
-            <input type="text" placeholder="Optional" value={leaveReason} onChange={(e) => setLeaveReason(e.target.value)} />
-          </div>
-          <button className="btn primary" onClick={handleAddLeave}>
-            Add
-          </button>
         </div>
       )}
     </div>

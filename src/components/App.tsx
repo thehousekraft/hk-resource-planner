@@ -779,7 +779,7 @@ export default function App({
 
       {canSee("bench") && (
         <section className={"panel" + (activeTab === "bench" ? " active" : "")}>
-          <Bench state={state} />
+          <Bench state={state} isAdmin={isAdmin} onAddLeave={addLeave} onDeleteLeave={deleteLeave} />
         </section>
       )}
 
@@ -804,8 +804,6 @@ export default function App({
             onUploadBaselineSow={uploadBaselineSow}
             onUpdateBaselineSowRow={updateBaselineSowRow}
             onDeleteBaselineSowRow={deleteBaselineSowRow}
-            onAddLeave={addLeave}
-            onDeleteLeave={deleteLeave}
             onAddHoliday={addHoliday}
             onDeleteHoliday={deleteHoliday}
           />
